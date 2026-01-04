@@ -173,9 +173,6 @@ def _handle_poll_data(poll_data, group=None):
     print(
         f"📊 Handling poll data: {poll_data.get('question', 'unknown')[:50]}..."
     )
-    node = None
-    if group:
-        node = group.node_set.first()
 
     options = poll_data.get("options", [])
     yes_count = 0
@@ -184,14 +181,19 @@ def _handle_poll_data(poll_data, group=None):
         yes_count = options[0].get("voter_count", 0)
         no_count = options[1].get("voter_count", 0)
 
+    defaults = dict(
+        question=poll_data.get("question", ""),
+        yes_count=yes_count,
+        no_count=no_count,
+    )
+
+    if group:
+        node = group.node_set.first()
+        defaults["node"] = node
+
     poll, created = Poll.objects.update_or_create(
         telegram_id=poll_data["id"],
-        defaults=dict(
-            node=node,
-            question=poll_data.get("question", ""),
-            yes_count=yes_count,
-            no_count=no_count,
-        ),
+        defaults=defaults,
     )
     action = "created" if created else "updated"
     print(f"📊 Poll {action}: yes={yes_count}, no={no_count}")
