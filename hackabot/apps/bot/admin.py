@@ -51,9 +51,18 @@ class GroupAdmin(admin.ModelAdmin):
 
 @admin.register(Person)
 class PersonAdmin(admin.ModelAdmin):
-    list_display = ["id", "telegram_id", "first_name", "username", "is_bot"]
-    list_filter = ["is_bot"]
-    search_fields = ["telegram_id", "first_name", "username"]
+    list_display = [
+        "id",
+        "telegram_id",
+        "first_name",
+        "username",
+        "username_x",
+        "is_bot",
+        "privacy",
+        "onboarded",
+    ]
+    list_filter = ["is_bot", "privacy", "onboarded"]
+    search_fields = ["telegram_id", "first_name", "username", "username_x"]
     ordering = ["-id"]
 
 
@@ -109,15 +118,17 @@ class NodeAdmin(admin.ModelAdmin):
         "id",
         "name",
         "emoji",
+        "slug",
         "location",
         "timezone",
         "messages_7d",
         "messages_30d",
         "established",
+        "signup_url",
         "group",
         "created",
     ]
-    search_fields = ["name", "location"]
+    search_fields = ["name", "location", "slug"]
     ordering = ["name"]
     raw_id_fields = ["group"]
     inlines = [EventInline]
