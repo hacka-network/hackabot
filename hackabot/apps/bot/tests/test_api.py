@@ -1,6 +1,7 @@
 import pytest
 from datetime import date, timedelta
 from django.test import Client
+from django.utils import timezone
 
 from hackabot.apps.bot.models import (
     ActivityDay,
@@ -8,6 +9,8 @@ from hackabot.apps.bot.models import (
     GroupPerson,
     Node,
     Person,
+    Poll,
+    PollAnswer,
 )
 
 
@@ -21,7 +24,7 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         assert response.status_code == 200
-        assert response.json() == {"nodes": []}
+        assert response.json() == {"nodes": [], "people": []}
 
     def test_cors_headers(self, client, db):
         response = client.get("/api/nodes/")
@@ -62,7 +65,8 @@ class TestApiNodes:
         assert node_data["url"] == "https://example.com"
         assert node_data["established"] == 2020
         assert node_data["activity_level"] == 0
-        assert node_data["people"] == []
+        assert "people" not in node_data
+        assert data["people"] == []
 
     def test_nodes_ordered_by_established(self, client, db):
         Node.objects.create(name="Third", established=2022)
@@ -113,9 +117,10 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         data = response.json()
-        people = data["nodes"][0]["people"]
+        people = data["people"]
         assert len(people) == 1
         assert people[0]["display_name"] == "Public Person"
+        assert people[0]["nodes"][0]["id"] == str(node.slug)
 
     def test_people_must_have_display_name_or_username_x(self, client, db):
         group = Group.objects.create(
@@ -155,7 +160,7 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         data = response.json()
-        people = data["nodes"][0]["people"]
+        people = data["people"]
         assert len(people) == 2
 
         display_names = [p["display_name"] for p in people]
@@ -188,7 +193,7 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         data = response.json()
-        people = data["nodes"][0]["people"]
+        people = data["people"]
         assert len(people) == 1
         assert people[0]["display_name"] == "Active"
 
@@ -211,10 +216,13 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         data = response.json()
-        person_data = data["nodes"][0]["people"][0]
+        person_data = data["people"][0]
         assert person_data["display_name"] == "Alice"
         assert person_data["username_x"] == "alice_x"
         assert person_data["bio"] == "Building cool stuff"
+        assert person_data["nodes"] == [
+            {"id": str(node.slug), "attending": False}
+        ]
 
     def test_person_bio_excluded_when_empty(self, client, db):
         group = Group.objects.create(
@@ -234,7 +242,7 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         data = response.json()
-        person_data = data["nodes"][0]["people"][0]
+        person_data = data["people"][0]
         assert "bio" not in person_data
 
     def test_person_username_x_null_when_empty(self, client, db):
@@ -255,16 +263,16 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         data = response.json()
-        person_data = data["nodes"][0]["people"][0]
+        person_data = data["people"][0]
         assert person_data["username_x"] is None
 
-    def test_node_without_group_has_empty_people(self, client, db):
+    def test_node_without_group_has_no_people(self, client, db):
         node = Node.objects.create(name="Orphan Node")
 
         response = client.get("/api/nodes/")
 
         data = response.json()
-        assert data["nodes"][0]["people"] == []
+        assert data["people"] == []
 
     def test_activity_level_zero_with_no_activity(self, client, db):
         group = Group.objects.create(
@@ -346,3 +354,164 @@ class TestApiNodes:
 
         data = response.json()
         assert data["nodes"][0]["activity_level"] == 0
+
+    def test_person_attending_true_for_recent_yes_vote(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        assert person_data["nodes"][0]["attending"] is True
+
+    def test_person_attending_false_for_no_vote(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=False)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        assert person_data["nodes"][0]["attending"] is False
+
+    def test_person_attending_false_for_old_poll(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        old_date = timezone.now() - timedelta(days=10)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+        )
+        Poll.objects.filter(pk=poll.pk).update(created=old_date)
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        assert person_data["nodes"][0]["attending"] is False
+
+    def test_people_sorted_attending_first_then_alphabetically(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group)
+
+        alice = Person.objects.create(
+            telegram_id=1, first_name="Alice", privacy=False
+        )
+        bob = Person.objects.create(
+            telegram_id=2, first_name="Bob", privacy=False
+        )
+        charlie = Person.objects.create(
+            telegram_id=3, first_name="Charlie", privacy=False
+        )
+        david = Person.objects.create(
+            telegram_id=4, first_name="David", privacy=False
+        )
+
+        GroupPerson.objects.create(group=group, person=alice, left=False)
+        GroupPerson.objects.create(group=group, person=bob, left=False)
+        GroupPerson.objects.create(group=group, person=charlie, left=False)
+        GroupPerson.objects.create(group=group, person=david, left=False)
+
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+        )
+        PollAnswer.objects.create(poll=poll, person=charlie, yes=True)
+        PollAnswer.objects.create(poll=poll, person=alice, yes=True)
+        PollAnswer.objects.create(poll=poll, person=bob, yes=False)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        names = [p["display_name"] for p in data["people"]]
+        assert names == ["Alice", "Charlie", "Bob", "David"]
+
+    def test_person_in_multiple_nodes(self, client, db):
+        group1 = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Group 1",
+        )
+        group2 = Group.objects.create(
+            telegram_id=-1001234567891,
+            display_name="Group 2",
+        )
+        node1 = Node.objects.create(name="Node 1", group=group1)
+        node2 = Node.objects.create(name="Node 2", group=group2)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group1, person=person, left=False)
+        GroupPerson.objects.create(group=group2, person=person, left=False)
+
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node1,
+            question="Coming this week?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert len(data["people"]) == 1
+        person_data = data["people"][0]
+        assert len(person_data["nodes"]) == 2
+
+        node_map = {n["id"]: n["attending"] for n in person_data["nodes"]}
+        assert node_map[str(node1.slug)] is True
+        assert node_map[str(node2.slug)] is False

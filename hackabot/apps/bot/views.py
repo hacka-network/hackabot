@@ -627,31 +627,19 @@ def _calculate_activity_level(group):
         return 10
 
 
-def _get_node_people(node):
+def _get_this_weeks_attending_person_ids(node):
     if not node.group:
-        return []
+        return set()
 
-    people = (
-        Person.objects.filter(
-            groupperson__group=node.group,
-            groupperson__left=False,
-            privacy=False,
-        )
-        .filter(Q(first_name__gt="") | Q(username_x__gt=""))
-        .distinct()
-    )
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
-    result = []
-    for person in people:
-        person_data = dict(
-            display_name=person.first_name,
-            username_x=person.username_x if person.username_x else None,
-        )
-        if person.bio:
-            person_data["bio"] = person.bio
-        result.append(person_data)
+    attending_ids = PollAnswer.objects.filter(
+        poll__node=node,
+        poll__created__gte=seven_days_ago,
+        yes=True,
+    ).values_list("person_id", flat=True)
 
-    return result
+    return set(attending_ids)
 
 
 def _cors_response(response):
@@ -672,6 +660,8 @@ def api_nodes(request):
     nodes = Node.objects.all().order_by(F("established").asc(nulls_last=True))
 
     nodes_data = []
+    node_attending_map = {}
+
     for node in nodes:
         node_data = dict(
             id=str(node.slug),
@@ -680,9 +670,53 @@ def api_nodes(request):
             url=node.signup_url,
             established=node.established,
             activity_level=_calculate_activity_level(node.group),
-            people=_get_node_people(node),
         )
         nodes_data.append(node_data)
+        node_attending_map[node.id] = _get_this_weeks_attending_person_ids(node)
 
-    response = JsonResponse(dict(nodes=nodes_data))
+    people = (
+        Person.objects.filter(
+            groupperson__left=False,
+            groupperson__group__node__isnull=False,
+            privacy=False,
+        )
+        .filter(Q(first_name__gt="") | Q(username_x__gt=""))
+        .prefetch_related("groupperson_set__group__node_set")
+        .distinct()
+    )
+
+    people_data = []
+    for person in people:
+        person_nodes = []
+        is_attending_any = False
+
+        for gp in person.groupperson_set.all():
+            if gp.left:
+                continue
+            for node in gp.group.node_set.all():
+                attending = person.id in node_attending_map.get(node.id, set())
+                if attending:
+                    is_attending_any = True
+                person_nodes.append(dict(
+                    id=str(node.slug),
+                    attending=attending,
+                ))
+
+        if not person_nodes:
+            continue
+
+        person_data = dict(
+            display_name=person.first_name,
+            username_x=person.username_x if person.username_x else None,
+            nodes=person_nodes,
+        )
+        if person.bio:
+            person_data["bio"] = person.bio
+
+        people_data.append((is_attending_any, person.first_name.lower(), person_data))
+
+    people_data.sort(key=lambda x: (not x[0], x[1]))
+    people_list = [p[2] for p in people_data]
+
+    response = JsonResponse(dict(nodes=nodes_data, people=people_list))
     return _cors_response(response)
