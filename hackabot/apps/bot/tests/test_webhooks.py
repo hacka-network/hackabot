@@ -13,10 +13,20 @@ from hackabot.apps.bot.models import (
     PollAnswer,
 )
 
+TEST_WEBHOOK_SECRET = "test-webhook-secret-123"
+
 
 @pytest.fixture
 def client():
     return Client()
+
+
+@pytest.fixture(autouse=True)
+def set_webhook_secret(monkeypatch):
+    monkeypatch.setattr(
+        "hackabot.apps.bot.telegram.TELEGRAM_WEBHOOK_SECRET",
+        TEST_WEBHOOK_SECRET,
+    )
 
 
 def post_webhook(client, data):
@@ -24,6 +34,7 @@ def post_webhook(client, data):
         "/webhook/telegram/",
         data=json.dumps(data),
         content_type="application/json",
+        HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN=TEST_WEBHOOK_SECRET,
     )
 
 
@@ -679,11 +690,31 @@ class TestWebhookPolls:
 
 
 class TestWebhookEdgeCases:
+    def test_missing_secret_rejected(self, client, db):
+        response = client.post(
+            "/webhook/telegram/",
+            data=json.dumps({"update_id": 1001}),
+            content_type="application/json",
+        )
+
+        assert response.status_code == 403
+
+    def test_wrong_secret_rejected(self, client, db):
+        response = client.post(
+            "/webhook/telegram/",
+            data=json.dumps({"update_id": 1001}),
+            content_type="application/json",
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN="wrong-secret",
+        )
+
+        assert response.status_code == 403
+
     def test_invalid_json(self, client, db):
         response = client.post(
             "/webhook/telegram/",
             data="not valid json",
             content_type="application/json",
+            HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN=TEST_WEBHOOK_SECRET,
         )
 
         assert response.status_code == 400

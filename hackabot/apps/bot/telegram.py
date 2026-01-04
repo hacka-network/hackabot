@@ -8,9 +8,15 @@ import requests
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_WEBHOOK_URL = os.environ.get("TELEGRAM_WEBHOOK_URL", "")
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
 ALLOWED_UPDATES = ["message", "poll", "poll_answer", "chat_member"]
+
+
+def verify_webhook_secret(request):
+    header_value = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    return header_value == TELEGRAM_WEBHOOK_SECRET
 
 
 def _get_bot_token():
@@ -41,12 +47,15 @@ def verify_webhook():
 
     # Set the webhook
     print(f"[hackabot] Setting webhook to: {TELEGRAM_WEBHOOK_URL}")
+    payload = dict(
+        url=TELEGRAM_WEBHOOK_URL,
+        allowed_updates=ALLOWED_UPDATES,
+    )
+    if TELEGRAM_WEBHOOK_SECRET:
+        payload["secret_token"] = TELEGRAM_WEBHOOK_SECRET
     resp = requests.post(
         f"{TELEGRAM_API_BASE}/{token}/setWebhook",
-        json=dict(
-            url=TELEGRAM_WEBHOOK_URL,
-            allowed_updates=ALLOWED_UPDATES,
-        ),
+        json=payload,
     )
     resp.raise_for_status()
     result = resp.json()

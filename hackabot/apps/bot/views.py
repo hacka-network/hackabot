@@ -15,6 +15,7 @@ from .models import (
     Poll,
     PollAnswer,
 )
+from .telegram import verify_webhook_secret
 
 
 def _get_or_create_person(user_data):
@@ -204,6 +205,9 @@ def _handle_my_chat_member(my_chat_member_data):
 @csrf_exempt
 @require_POST
 def telegram_webhook(request):
+    if not verify_webhook_secret(request):
+        return HttpResponse(status=403)
+
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:

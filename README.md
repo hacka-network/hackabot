@@ -14,9 +14,13 @@
    HACKABOT_ENV=dev
    TELEGRAM_BOT_TOKEN=your_bot_token
    TELEGRAM_WEBHOOK_URL=https://your-domain.com/webhook/telegram/
+   TELEGRAM_WEBHOOK_SECRET=your_random_secret
    DJANGO_SECRET_KEY=your_secret_key
    SENTRY_DSN=your_sentry_dsn
    ```
+
+   `TELEGRAM_WEBHOOK_SECRET` is used to verify that webhook requests are
+   actually from Telegram. Generate a random string (1-256 chars, A-Za-z0-9_-).
 
    In production, set `HACKABOT_ENV=production` and set `DATABASE_URL`.
 
@@ -76,6 +80,7 @@ heroku pg:backups:schedule DATABASE_URL --at '02:00 America/Los_Angeles'
 
 # Config
 heroku config:set HACKABOT_ENV=production \
+    TELEGRAM_WEBHOOK_SECRET=your_random_secret \
     PGBOUNCER_DEFAULT_POOL_SIZE=10 PGBOUNCER_RESERVE_POOL_SIZE=5 \
     PGBOUNCER_MAX_CLIENT_CONN=500 \
     PGBOUNCER_LOG_CONNECTIONS=0 PGBOUNCER_LOG_DISCONNECTIONS=0
