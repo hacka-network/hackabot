@@ -26,7 +26,7 @@ from .telegram import send, verify_webhook_secret
 def _get_or_create_person(user_data):
     if not user_data:
         return None
-    person, _ = Person.objects.update_or_create(
+    person, created = Person.objects.update_or_create(
         telegram_id=user_data["id"],
         defaults=dict(
             is_bot=user_data.get("is_bot", False),
@@ -34,12 +34,16 @@ def _get_or_create_person(user_data):
             username=user_data.get("username", ""),
         ),
     )
+    action = "created" if created else "updated"
+    print(f"👤 Person {action}: {person.first_name} (@{person.username})")
     return person
 
 
 def _onboard_new_member(person, group):
     if person.is_bot or person.onboarded:
         return
+
+    print(f"🎉 Onboarding new member: {person.first_name} in {group.display_name}")
 
     name = person.first_name or "there"
     mention = f"[{name}](tg://user?id={person.telegram_id})"
@@ -54,6 +58,7 @@ def _onboard_new_member(person, group):
 
     person.onboarded = True
     person.save()
+    print(f"✅ Onboarding complete for {person.first_name}")
 
 
 def _get_or_create_group(chat_data):
@@ -62,23 +67,29 @@ def _get_or_create_group(chat_data):
     chat_type = chat_data.get("type", "")
     if chat_type not in ("group", "supergroup"):
         return None
-    group, _ = Group.objects.update_or_create(
+    group, created = Group.objects.update_or_create(
         telegram_id=chat_data["id"],
         defaults=dict(
             display_name=chat_data.get("title", ""),
         ),
     )
+    action = "created" if created else "updated"
+    print(f"👥 Group {action}: {group.display_name}")
     return group
 
 
 def _handle_message(message_data):
+    print("💬 Handling group message...")
     chat_data = message_data.get("chat")
     group = _get_or_create_group(chat_data)
     if not group:
+        print("⚠️ No valid group found, skipping message")
         return
 
     # Handle join events
     new_members = message_data.get("new_chat_members", [])
+    if new_members:
+        print(f"➡️ Processing {len(new_members)} new member(s) joining")
     for member_data in new_members:
         person = _get_or_create_person(member_data)
         if person:
@@ -87,11 +98,13 @@ def _handle_message(message_data):
                 person=person,
                 defaults=dict(left=False),
             )
+            print(f"✅ {person.first_name} joined {group.display_name}")
             _onboard_new_member(person, group)
 
     # Handle leave events
     left_member = message_data.get("left_chat_member")
     if left_member:
+        print("⬅️ Processing member leaving")
         person = _get_or_create_person(left_member)
         if person:
             GroupPerson.objects.update_or_create(
@@ -99,9 +112,11 @@ def _handle_message(message_data):
                 person=person,
                 defaults=dict(left=True),
             )
+            print(f"👋 {person.first_name} left {group.display_name}")
 
     # Handle regular messages
     if message_data.get("text"):
+        print(f"📝 Processing text message in {group.display_name}")
         user_data = message_data.get("from")
         person = _get_or_create_person(user_data)
         unix_ts = message_data.get("date", 0)
@@ -141,10 +156,12 @@ def _handle_message(message_data):
     # Handle poll in message (when bot sends a poll)
     poll_data = message_data.get("poll")
     if poll_data:
+        print("📊 Found poll in message, processing...")
         _handle_poll_data(poll_data, group=group)
 
 
 def _handle_poll_data(poll_data, group=None):
+    print(f"📊 Handling poll data: {poll_data.get('question', 'unknown')[:50]}...")
     node = None
     if group:
         node = group.node_set.first()
@@ -156,7 +173,7 @@ def _handle_poll_data(poll_data, group=None):
         yes_count = options[0].get("voter_count", 0)
         no_count = options[1].get("voter_count", 0)
 
-    Poll.objects.update_or_create(
+    poll, created = Poll.objects.update_or_create(
         telegram_id=poll_data["id"],
         defaults=dict(
             node=node,
@@ -165,29 +182,36 @@ def _handle_poll_data(poll_data, group=None):
             no_count=no_count,
         ),
     )
+    action = "created" if created else "updated"
+    print(f"📊 Poll {action}: yes={yes_count}, no={no_count}")
 
 
 def _handle_poll_answer(poll_answer_data):
+    print("🗳️ Handling poll answer...")
     poll_id = poll_answer_data.get("poll_id")
     user_data = poll_answer_data.get("user")
     option_ids = poll_answer_data.get("option_ids", [])
 
     if not poll_id or not user_data:
+        print("⚠️ Missing poll_id or user_data, skipping")
         return
 
     try:
         poll = Poll.objects.get(telegram_id=poll_id)
     except Poll.DoesNotExist:
+        print(f"⚠️ Poll {poll_id} not found in database")
         return
 
     person = _get_or_create_person(user_data)
     if not person:
+        print("⚠️ Could not get/create person, skipping")
         return
 
     # option_ids[0] == 0 means "Yes", option_ids[0] == 1 means "No"
     # Empty option_ids means vote was retracted
     if not option_ids:
         PollAnswer.objects.filter(poll=poll, person=person).delete()
+        print(f"🗳️ {person.first_name} retracted their vote")
     else:
         yes = option_ids[0] == 0
         PollAnswer.objects.update_or_create(
@@ -195,23 +219,30 @@ def _handle_poll_answer(poll_answer_data):
             person=person,
             defaults=dict(yes=yes),
         )
+        vote = "Yes ✅" if yes else "No 👎"
+        print(f"🗳️ {person.first_name} voted: {vote}")
 
 
 def _handle_chat_member(chat_member_data):
+    print("👥 Handling chat_member update...")
     chat_data = chat_member_data.get("chat")
     group = _get_or_create_group(chat_data)
     if not group:
+        print("⚠️ No valid group found, skipping chat_member")
         return
 
     new_member = chat_member_data.get("new_chat_member", {})
     user_data = new_member.get("user")
     status = new_member.get("status")
+    print(f"👥 Member status change: {status}")
 
     if not user_data:
+        print("⚠️ No user_data in chat_member, skipping")
         return
 
     person = _get_or_create_person(user_data)
     if not person:
+        print("⚠️ Could not get/create person, skipping")
         return
 
     left = status in ("left", "kicked")
@@ -221,40 +252,56 @@ def _handle_chat_member(chat_member_data):
         defaults=dict(left=left),
     )
 
-    if not left:
+    if left:
+        print(f"👋 {person.first_name} left/kicked from {group.display_name}")
+    else:
+        print(f"➡️ {person.first_name} joined {group.display_name}")
         _onboard_new_member(person, group)
 
 
 def _handle_my_chat_member(my_chat_member_data):
+    print("🤖 Handling my_chat_member update (bot membership change)...")
     chat_data = my_chat_member_data.get("chat")
+    new_status = my_chat_member_data.get("new_chat_member", {}).get("status")
+    print(f"🤖 Bot status changed to: {new_status}")
     _get_or_create_group(chat_data)
 
 
 def _handle_dm(message_data):
+    print("📩 Handling DM...")
     chat_data = message_data.get("chat")
     if not chat_data or chat_data.get("type") != "private":
+        print("⚠️ Not a private chat, skipping DM handler")
         return
 
     user_data = message_data.get("from")
     if not user_data:
+        print("⚠️ No user_data in DM, skipping")
         return
 
     person = _get_or_create_person(user_data)
     if not person:
+        print("⚠️ Could not get/create person, skipping DM")
         return
 
     text = message_data.get("text", "").strip()
     chat_id = chat_data["id"]
+    print(f"📩 DM from {person.first_name}: {text[:50]}...")
 
     if text.startswith("/help") or text.startswith("/start"):
+        print("📩 Processing /help or /start command")
         _handle_help_command(chat_id, person)
     elif text.startswith("/x ") or text == "/x":
+        print("📩 Processing /x command")
         _handle_x_command(chat_id, person, text)
     elif text.startswith("/privacy"):
+        print("📩 Processing /privacy command")
         _handle_privacy_command(chat_id, person, text)
     elif text.startswith("/bio"):
+        print("📩 Processing /bio command")
         _handle_bio_command(chat_id, person, text)
     else:
+        print("📩 Unknown command, sending help prompt")
         send(
             chat_id,
             "🤔 I don't recognise that command.\n\nType /help to see what I can do!",
@@ -406,18 +453,23 @@ def _handle_bio_command(chat_id, person, text):
 @csrf_exempt
 @require_POST
 def telegram_webhook(request):
+    print("📥 Incoming webhook request...")
     if not verify_webhook_secret(request):
+        print("🔐❌ Webhook secret verification FAILED")
         return HttpResponse(status=403)
+    print("🔐✅ Webhook secret verified")
 
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
+        print("❌ Failed to parse JSON body")
         return HttpResponse(status=400)
 
-    print(f"[webhook] received update: {json.dumps(data, indent=2)}")
+    print(f"📥 Webhook received: {json.dumps(data, indent=2)}")
 
     # Handle message (includes text messages, join/leave service messages, polls)
     if "message" in data:
+        print("📥 Update type: message")
         message_data = data["message"]
         chat_type = message_data.get("chat", {}).get("type", "")
         if chat_type == "private":
@@ -427,18 +479,23 @@ def telegram_webhook(request):
 
     # Handle poll state updates
     if "poll" in data:
+        print("📥 Update type: poll")
         _handle_poll_data(data["poll"])
 
     # Handle individual poll answers
     if "poll_answer" in data:
+        print("📥 Update type: poll_answer")
         _handle_poll_answer(data["poll_answer"])
 
     # Handle chat member updates (join/leave via admin view)
     if "chat_member" in data:
+        print("📥 Update type: chat_member")
         _handle_chat_member(data["chat_member"])
 
     # Handle bot's own membership updates (e.g. bot added to a group)
     if "my_chat_member" in data:
+        print("📥 Update type: my_chat_member")
         _handle_my_chat_member(data["my_chat_member"])
 
+    print("📥✅ Webhook processed successfully")
     return JsonResponse(dict(ok=True))

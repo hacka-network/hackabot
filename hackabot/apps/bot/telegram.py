@@ -16,7 +16,12 @@ ALLOWED_UPDATES = ["message", "poll", "poll_answer", "chat_member"]
 
 def verify_webhook_secret(request):
     header_value = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    return header_value == TELEGRAM_WEBHOOK_SECRET
+    is_valid = header_value == TELEGRAM_WEBHOOK_SECRET
+    if is_valid:
+        print("🔐 Webhook secret: valid")
+    else:
+        print("🔐 Webhook secret: INVALID")
+    return is_valid
 
 
 def _get_bot_token():
@@ -30,23 +35,25 @@ def _get_bot_token():
 
 def verify_webhook():
     if not TELEGRAM_WEBHOOK_URL:
-        print("[hackabot] TELEGRAM_WEBHOOK_URL not set, skipping webhook setup")
+        print("⚙️ TELEGRAM_WEBHOOK_URL not set, skipping webhook setup")
         return False
 
     token = _get_bot_token()
 
     # Get current webhook info
+    print("📤 Calling Telegram API: getWebhookInfo")
     resp = requests.get(f"{TELEGRAM_API_BASE}/{token}/getWebhookInfo")
     resp.raise_for_status()
     info = resp.json()
+    print(f"📥 getWebhookInfo response: {info}")
     current_url = info.get("result", {}).get("url", "")
 
     if current_url == TELEGRAM_WEBHOOK_URL:
-        print(f"[hackabot] Webhook already set to: {TELEGRAM_WEBHOOK_URL}")
+        print(f"✅ Webhook already set to: {TELEGRAM_WEBHOOK_URL}")
         return True
 
     # Set the webhook
-    print(f"[hackabot] Setting webhook to: {TELEGRAM_WEBHOOK_URL}")
+    print(f"📤 Calling Telegram API: setWebhook -> {TELEGRAM_WEBHOOK_URL}")
     payload = dict(
         url=TELEGRAM_WEBHOOK_URL,
         allowed_updates=ALLOWED_UPDATES,
@@ -59,16 +66,18 @@ def verify_webhook():
     )
     resp.raise_for_status()
     result = resp.json()
+    print(f"📥 setWebhook response: {result}")
     if result.get("ok"):
-        print("[hackabot] Webhook set successfully")
+        print("✅ Webhook set successfully")
         return True
     else:
-        print(f"[hackabot] Failed to set webhook: {result}")
+        print(f"❌ Failed to set webhook: {result}")
         return False
 
 
 def send(chat_id, text):
-    print(f"[hackabot] [{chat_id}] SEND: {text}")
+    print(f"📤 Calling Telegram API: sendMessage to chat {chat_id}")
+    print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/sendMessage"
     resp = requests.post(
@@ -80,8 +89,9 @@ def send(chat_id, text):
             disable_web_page_preview=True,
         ),
     )
-    print(f"[hackabot] response: {resp.text}")
+    print(f"📥 sendMessage response: {resp.text}")
     resp.raise_for_status()
+    print("✅ Message sent successfully")
 
 
 def send_poll(node, when="Thursday"):
@@ -90,6 +100,8 @@ def send_poll(node, when="Thursday"):
     chat_id = node.group.telegram_id
     name = f"{node.emoji} {node.name}" if node.emoji else node.name
 
+    print(f"📊 Sending poll to {name} (chat {chat_id})")
+    print(f"📤 Calling Telegram API: sendPoll")
     token = _get_bot_token()
     resp = requests.post(
         f"{TELEGRAM_API_BASE}/{token}/sendPoll",
@@ -101,8 +113,9 @@ def send_poll(node, when="Thursday"):
             allows_multiple_answers=False,
         ),
     )
-    print(f"[hackabot-poll] response: {resp.text}")
+    print(f"📥 sendPoll response: {resp.text}")
     resp.raise_for_status()
+    print("✅ Poll sent successfully")
     obj = resp.json()
     result = obj["result"]
     message_id = result["message_id"]
@@ -110,6 +123,7 @@ def send_poll(node, when="Thursday"):
 
     # Save the poll to DB
     if poll_data:
+        print(f"💾 Saving poll to database: {poll_data['id']}")
         Poll.objects.update_or_create(
             telegram_id=poll_data["id"],
             defaults=dict(
@@ -119,8 +133,10 @@ def send_poll(node, when="Thursday"):
                 no_count=0,
             ),
         )
+        print("✅ Poll saved to database")
 
     # Send an invite to the global group
+    print("📤 Sending global chat invite message...")
     hacka_network_global_invite_url = "https://t.me/+XTK6oIHCVZFkNmY1"
     send(
         chat_id,
@@ -130,7 +146,7 @@ def send_poll(node, when="Thursday"):
 
     # Try to pin it
     try:
-        print("[hackabot] trying to pin it")
+        print(f"📤 Calling Telegram API: pinChatMessage (message {message_id})")
         resp = requests.post(
             f"{TELEGRAM_API_BASE}/{token}/pinChatMessage",
             json=dict(
@@ -139,15 +155,18 @@ def send_poll(node, when="Thursday"):
                 disable_notification=False,
             ),
         )
-        print("[hackabot] got: ", resp.json())
+        print(f"📥 pinChatMessage response: {resp.json()}")
+        print("📌 Poll pinned successfully")
     except Exception as e:
-        print(f"[hackabot] failed to pin it: {e}")
+        print(f"❌ Failed to pin poll: {e}")
 
 
 def send_event_reminder(event):
     node = event.node
     chat_id = node.group.telegram_id
     time_str = event.time.strftime("%-I:%M%p").lower().replace(":00", "")
+
+    print(f"🔔 Sending event reminder: {event.type} for {node.name}")
 
     if event.type == "intros":
         send(chat_id, f"🔔👋  Reminder! *Intros are at {time_str}*")
@@ -163,3 +182,5 @@ def send_event_reminder(event):
             send(chat_id, f"🍺🍻🍷  {event.where} — let's go!")
         else:
             send(chat_id, "🍺🍻🍷  Drinks time — let's go!")
+
+    print(f"✅ Event reminder sent for {event.type}")
