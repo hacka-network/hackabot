@@ -1,0 +1,48 @@
+[project]
+name = "hackabot"
+version = "0.1.0"
+description = "Telegram bot for Hacka* hackathon communities"
+requires-python = ">=3.14"
+dependencies = [
+    "django==6.0",
+    "requests==2.32.5",
+    "arrow==1.4.0",
+    "schedule==1.2.2",
+    "sentry-sdk==2.48.0",
+    "python-dotenv==1.2.1",
+    "daphne==4.2.1",
+    "whitenoise==6.11.0",
+    "dj-database-url==3.0.1",
+    "psycopg2-binary==2.9.11",
+    "black==25.11.0",
+    "flake8==7.3.0",
+    "isort==7.0.0",
+    "ipython==9.8.0",
+    "pytest==8.3.5",
+    "pytest-django==4.9.0",
+    "pytest-cov==6.0.0",
+    "responses==0.25.3",
+]
+
+[tool.black]
+line-length = 79
+
+[tool.isort]
+profile = "black"
+line_length = 79
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "hackabot.settings"
+python_files = ["test_*.py"]
+addopts = "-v --tb=short --cov --cov-fail-under=70"
+
+[tool.coverage.run]
+source = ["hackabot"]
+omit = ["*/migrations/*", "*/tests/*", "manage.py"]
+
+[tool.coverage.report]
+fail_under = 70
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
