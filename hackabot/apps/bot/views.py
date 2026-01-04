@@ -683,6 +683,8 @@ def api_nodes(request):
             emoji=node.emoji,
             url=node.signup_url,
             established=node.established,
+            location=node.location,
+            timezone=node.timezone,
             activity_level=_calculate_activity_level(node),
         )
         nodes_data.append(node_data)

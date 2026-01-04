@@ -63,6 +63,8 @@ class TestApiNodes:
         assert node_data["emoji"] == "🚀"
         assert node_data["url"] == "https://example.com"
         assert node_data["established"] == 2020
+        assert node_data["location"] == ""
+        assert node_data["timezone"] == "UTC"
         assert node_data["activity_level"] == 0
         assert "people" not in node_data
         assert data["people"] == []
