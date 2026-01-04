@@ -1,6 +1,7 @@
 import html
 import json
 import re
+import zoneinfo
 from datetime import datetime, timedelta, timezone
 
 from django.db.models import F, Q, Sum
@@ -592,41 +593,52 @@ def telegram_webhook(request):
     return JsonResponse(dict(ok=True))
 
 
-def _calculate_activity_level(group):
-    if not group:
+def _calculate_activity_level(node):
+    if not node:
         return 0
 
-    thirty_days_ago = datetime.now(timezone.utc).date() - timedelta(days=30)
-    total_messages = (
-        ActivityDay.objects.filter(
-            group=group,
-            date__gte=thirty_days_ago,
-        ).aggregate(total=Sum("message_count"))["total"]
-        or 0
+    try:
+        tz = zoneinfo.ZoneInfo(node.timezone)
+    except zoneinfo.ZoneInfoNotFoundError:
+        tz = zoneinfo.ZoneInfo("UTC")
+
+    now = datetime.now(tz)
+
+    # Find the most recent Thursday at midnight
+    days_since_thursday = (now.weekday() - 3) % 7
+    thursday_midnight = now.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) - timedelta(days=days_since_thursday)
+
+    # Week ends at Thursday 23:59
+    thursday_end = thursday_midnight.replace(hour=23, minute=59)
+
+    # If we haven't reached the end of this week yet, go back a week
+    if now <= thursday_end:
+        last_complete_week_end = thursday_end - timedelta(weeks=1)
+    else:
+        last_complete_week_end = thursday_end
+
+    # Look back 4 weeks from the end of the last complete week
+    four_weeks_before = last_complete_week_end - timedelta(weeks=4)
+
+    # Query polls for this node within this window
+    polls = Poll.objects.filter(
+        node=node,
+        created__gt=four_weeks_before,
+        created__lte=last_complete_week_end,
     )
 
-    if total_messages == 0:
+    poll_count = polls.count()
+    if poll_count == 0:
         return 0
-    elif total_messages < 10:
-        return 1
-    elif total_messages < 30:
-        return 2
-    elif total_messages < 60:
-        return 3
-    elif total_messages < 100:
-        return 4
-    elif total_messages < 200:
-        return 5
-    elif total_messages < 400:
-        return 6
-    elif total_messages < 700:
-        return 7
-    elif total_messages < 1000:
-        return 8
-    elif total_messages < 1500:
-        return 9
-    else:
-        return 10
+
+    total_yes = sum(poll.yes_count for poll in polls)
+    average_attendees = total_yes / poll_count
+
+    # Scale: 8+ attendees = 10, 0 = 0, linear in between
+    activity_level = min(10, round(average_attendees * 10 / 8))
+    return activity_level
 
 
 def _get_this_weeks_attending_person_ids(node):
@@ -671,7 +683,7 @@ def api_nodes(request):
             emoji=node.emoji,
             url=node.signup_url,
             established=node.established,
-            activity_level=_calculate_activity_level(node.group),
+            activity_level=_calculate_activity_level(node),
         )
         nodes_data.append(node_data)
         node_attending_map[node.id] = _get_this_weeks_attending_person_ids(node)

@@ -1,10 +1,9 @@
 import pytest
-from datetime import date, timedelta
+from datetime import timedelta
 from django.test import Client
 from django.utils import timezone
 
 from hackabot.apps.bot.models import (
-    ActivityDay,
     Group,
     GroupPerson,
     Node,
@@ -274,7 +273,7 @@ class TestApiNodes:
         data = response.json()
         assert data["people"] == []
 
-    def test_activity_level_zero_with_no_activity(self, client, db):
+    def test_activity_level_zero_with_no_polls(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
@@ -286,61 +285,94 @@ class TestApiNodes:
         data = response.json()
         assert data["nodes"][0]["activity_level"] == 0
 
-    def test_activity_level_low(self, client, db):
+    def test_activity_level_based_on_poll_yes_count(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        node = Node.objects.create(name="Test Node", group=group)
-        person = Person.objects.create(telegram_id=1, first_name="Alice")
+        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
 
-        ActivityDay.objects.create(
-            person=person,
-            group=group,
-            date=date.today(),
-            message_count=5,
+        two_weeks_ago = timezone.now() - timedelta(weeks=2)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+            yes_count=4,
         )
+        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
 
         response = client.get("/api/nodes/")
 
         data = response.json()
-        assert data["nodes"][0]["activity_level"] == 1
+        assert data["nodes"][0]["activity_level"] == 5
 
-    def test_activity_level_high(self, client, db):
+    def test_activity_level_max_at_8_attendees(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        node = Node.objects.create(name="Test Node", group=group)
-        person = Person.objects.create(telegram_id=1, first_name="Alice")
+        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
 
-        ActivityDay.objects.create(
-            person=person,
-            group=group,
-            date=date.today(),
-            message_count=2000,
+        two_weeks_ago = timezone.now() - timedelta(weeks=2)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+            yes_count=10,
         )
+        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
 
         response = client.get("/api/nodes/")
 
         data = response.json()
         assert data["nodes"][0]["activity_level"] == 10
 
-    def test_activity_level_ignores_old_activity(self, client, db):
+    def test_activity_level_averages_multiple_polls(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        node = Node.objects.create(name="Test Node", group=group)
-        person = Person.objects.create(telegram_id=1, first_name="Alice")
+        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
 
-        old_date = date.today() - timedelta(days=60)
-        ActivityDay.objects.create(
-            person=person,
-            group=group,
-            date=old_date,
-            message_count=2000,
+        two_weeks_ago = timezone.now() - timedelta(weeks=2)
+        three_weeks_ago = timezone.now() - timedelta(weeks=3)
+
+        poll1 = Poll.objects.create(
+            telegram_id="poll1",
+            node=node,
+            question="Coming this week?",
+            yes_count=8,
         )
+        Poll.objects.filter(pk=poll1.pk).update(created=two_weeks_ago)
+
+        poll2 = Poll.objects.create(
+            telegram_id="poll2",
+            node=node,
+            question="Coming this week?",
+            yes_count=4,
+        )
+        Poll.objects.filter(pk=poll2.pk).update(created=three_weeks_ago)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert data["nodes"][0]["activity_level"] == 8
+
+    def test_activity_level_ignores_old_polls(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
+
+        six_weeks_ago = timezone.now() - timedelta(weeks=6)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+            yes_count=10,
+        )
+        Poll.objects.filter(pk=poll.pk).update(created=six_weeks_ago)
 
         response = client.get("/api/nodes/")
 
