@@ -1,9 +1,9 @@
 import html
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from django.db.models import F
+from django.db.models import F, Q, Sum
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -43,7 +43,9 @@ def _onboard_new_member(person, group):
     if person.is_bot or person.onboarded:
         return
 
-    print(f"🎉 Onboarding new member: {person.first_name} in {group.display_name}")
+    print(
+        f"🎉 Onboarding new member: {person.first_name} in {group.display_name}"
+    )
 
     name = person.first_name or "there"
     mention = f"[{name}](tg://user?id={person.telegram_id})"
@@ -161,7 +163,9 @@ def _handle_message(message_data):
 
 
 def _handle_poll_data(poll_data, group=None):
-    print(f"📊 Handling poll data: {poll_data.get('question', 'unknown')[:50]}...")
+    print(
+        f"📊 Handling poll data: {poll_data.get('question', 'unknown')[:50]}..."
+    )
     node = None
     if group:
         node = group.node_set.first()
@@ -499,3 +503,101 @@ def telegram_webhook(request):
 
     print("📥✅ Webhook processed successfully")
     return JsonResponse(dict(ok=True))
+
+
+def _calculate_activity_level(group):
+    if not group:
+        return 0
+
+    thirty_days_ago = datetime.now(timezone.utc).date() - timedelta(days=30)
+    total_messages = (
+        ActivityDay.objects.filter(
+            group=group,
+            date__gte=thirty_days_ago,
+        ).aggregate(total=Sum("message_count"))["total"]
+        or 0
+    )
+
+    if total_messages == 0:
+        return 0
+    elif total_messages < 10:
+        return 1
+    elif total_messages < 30:
+        return 2
+    elif total_messages < 60:
+        return 3
+    elif total_messages < 100:
+        return 4
+    elif total_messages < 200:
+        return 5
+    elif total_messages < 400:
+        return 6
+    elif total_messages < 700:
+        return 7
+    elif total_messages < 1000:
+        return 8
+    elif total_messages < 1500:
+        return 9
+    else:
+        return 10
+
+
+def _get_node_people(node):
+    if not node.group:
+        return []
+
+    people = (
+        Person.objects.filter(
+            groupperson__group=node.group,
+            groupperson__left=False,
+            privacy=False,
+        )
+        .filter(Q(first_name__gt="") | Q(username_x__gt=""))
+        .distinct()
+    )
+
+    result = []
+    for person in people:
+        person_data = dict(
+            display_name=person.first_name,
+            username_x=person.username_x if person.username_x else None,
+        )
+        if person.bio:
+            person_data["bio"] = person.bio
+        result.append(person_data)
+
+    return result
+
+
+def _cors_response(response):
+    response["Access-Control-Allow-Origin"] = "*"
+    response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
+
+def api_nodes(request):
+    if request.method == "OPTIONS":
+        response = HttpResponse()
+        return _cors_response(response)
+
+    if request.method != "GET":
+        return HttpResponse(status=405)
+
+    nodes = Node.objects.all().order_by(F("established").asc(nulls_last=True))
+
+    nodes_data = []
+    for node in nodes:
+        node_data = dict(
+            id=str(node.slug),
+            name=node.name,
+            emoji=node.emoji,
+            url=node.signup_url,
+            established=node.established,
+            activity_level=_calculate_activity_level(node.group),
+            people=_get_node_people(node),
+        )
+        nodes_data.append(node_data)
+
+    response = JsonResponse(dict(nodes=nodes_data))
+    return _cors_response(response)
