@@ -1,10 +1,9 @@
 import time
 import traceback
-from functools import partial, wraps
 
 import arrow
-import schedule
 import sentry_sdk
+from django.utils import timezone
 
 from hackabot.apps.bot.telegram import (
     send_event_reminder,
@@ -12,93 +11,104 @@ from hackabot.apps.bot.telegram import (
     verify_webhook,
 )
 
-
-def make_time(hour, minute, tz, second=0):
-    t = (
-        arrow.now()
-        .to(tz or "UTC")
-        .replace(hour=hour, minute=minute, second=second)
-        .to("local")
-        .format("HH:mm:ss")
-    )
-    print(f"make_time({hour}, {minute}, {tz}, second={second}) -> {t}")
-    return t
+POLL_DAY = 0  # Monday (0 = Monday in arrow weekday)
+POLL_HOUR = 15
+POLL_MINUTE = 0
+EVENT_DAY = 3  # Thursday
 
 
-def wrap_errors(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
+def should_send_poll(node, now_in_tz):
+    if now_in_tz.weekday() != POLL_DAY:
+        return False
+
+    if now_in_tz.hour != POLL_HOUR:
+        return False
+
+    if now_in_tz.minute != POLL_MINUTE:
+        return False
+
+    if node.last_poll_sent_at:
+        days_since = (timezone.now() - node.last_poll_sent_at).days
+        if days_since < 6:
+            return False
+
+    return True
+
+
+def should_send_event_reminder(event, now_in_tz):
+    if now_in_tz.weekday() != EVENT_DAY:
+        return False
+
+    if now_in_tz.hour != event.time.hour:
+        return False
+
+    if now_in_tz.minute != event.time.minute:
+        return False
+
+    if event.last_reminder_sent_at:
+        days_since = (timezone.now() - event.last_reminder_sent_at).days
+        if days_since < 6:
+            return False
+
+    return True
+
+
+def process_node_poll(node):
+    now_in_tz = arrow.now(node.timezone or "UTC")
+    if should_send_poll(node, now_in_tz):
+        print(f"📊 Time to send poll for {node.name}")
         try:
-            return func(*args, **kwargs)
+            send_poll(node)
+            node.last_poll_sent_at = timezone.now()
+            node.save(update_fields=["last_poll_sent_at"])
+            print(f"✅ Poll sent and timestamp updated for {node.name}")
         except Exception as e:
-            print(f"Error in {func.__name__}: {e.__class__.__name__}: {e}")
+            print(f"❌ Error sending poll for {node.name}: {e}")
             sentry_sdk.capture_exception(e)
-            return None
-
-    return wrapper
 
 
-def schedule_node_poll(node):
-    tz = node.timezone
-    poll_hour = 15
-    poll_minute = 0
-
-    job_time = make_time(poll_hour, poll_minute, tz)
-    job = partial(send_poll, node)
-    job.__name__ = f"send_poll_{node.name}"
-
-    schedule.every().monday.at(job_time).do(wrap_errors(job))
-    print(f"  Scheduled poll for {node.name} at {job_time} (Monday)")
-
-
-def schedule_node_events(node):
+def process_node_events(node):
     from hackabot.apps.bot.models import Event
 
+    now_in_tz = arrow.now(node.timezone or "UTC")
     events = Event.objects.filter(node=node)
-    tz = node.timezone
 
     for event in events:
-        hour = event.time.hour
-        minute = event.time.minute
-        job_time = make_time(hour, minute, tz)
+        if should_send_event_reminder(event, now_in_tz):
+            print(f"🔔 Time to send {event.type} reminder for {node.name}")
+            try:
+                send_event_reminder(event)
+                event.last_reminder_sent_at = timezone.now()
+                event.save(update_fields=["last_reminder_sent_at"])
+                print(f"✅ Reminder sent and timestamp updated for {event}")
+            except Exception as e:
+                print(f"❌ Error sending reminder for {event}: {e}")
+                sentry_sdk.capture_exception(e)
 
-        job = partial(send_event_reminder, event)
-        job.__name__ = f"send_{event.type}_{node.name}"
 
-        schedule.every().thursday.at(job_time).do(wrap_errors(job))
-        print(f"  Scheduled {event.type} for {node.name} at {job_time} (Thursday)")
-
-
-def schedule_all_nodes():
+def check_all_nodes():
     from hackabot.apps.bot.models import Node
 
     nodes = Node.objects.filter(group__isnull=False).select_related("group")
-    print(f"Found {nodes.count()} nodes with groups")
 
     for node in nodes:
-        print(f"Scheduling {node.name}...")
-        schedule_node_poll(node)
-        schedule_node_events(node)
+        process_node_poll(node)
+        process_node_events(node)
 
 
 def run_worker():
     print("🤖🤖🤖 Hackabot Worker starting...")
 
-    # Verify webhook is set correctly
     verify_webhook()
 
-    # Schedule all nodes from DB
-    schedule_all_nodes()
-
-    print("All tasks scheduled:")
-    for job in schedule.jobs:
-        print(f"  {job}")
+    print("Worker will check for tasks every minute...")
 
     while 1:
         try:
-            schedule.run_pending()
-            time.sleep(1)
+            check_all_nodes()
+            time.sleep(60)
         except Exception as e:
             print("--- Worker error ---")
             print(traceback.format_exc())
             sentry_sdk.capture_exception(e)
+            time.sleep(60)

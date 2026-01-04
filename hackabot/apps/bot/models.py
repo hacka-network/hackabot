@@ -101,6 +101,7 @@ class Node(models.Model):
     timezone = models.CharField(
         max_length=50, default="UTC", help_text="e.g. Europe/Paris"
     )
+    last_poll_sent_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.emoji} {self.name}" if self.emoji else self.name
@@ -117,6 +118,11 @@ class Node(models.Model):
             signup_url=self.signup_url,
             location=self.location,
             timezone=self.timezone,
+            last_poll_sent_at=(
+                self.last_poll_sent_at.isoformat()
+                if self.last_poll_sent_at
+                else None
+            ),
         )
 
 
@@ -137,6 +143,7 @@ class Event(models.Model):
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     time = models.TimeField(help_text="Time of day for this event")
     where = models.CharField(max_length=255, blank=True)
+    last_reminder_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ["node", "type"]
@@ -151,6 +158,11 @@ class Event(models.Model):
             type=self.type,
             time=self.time.isoformat(),
             where=self.where,
+            last_reminder_sent_at=(
+                self.last_reminder_sent_at.isoformat()
+                if self.last_reminder_sent_at
+                else None
+            ),
         )
 
 
