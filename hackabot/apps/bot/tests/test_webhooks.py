@@ -1558,7 +1558,7 @@ class TestBioCommand:
         assert person.bio == "I build cool stuff"
         assert "I build cool stuff" in sent_messages[0][1]
 
-    def test_bio_command_clears_bio(self, client, db, monkeypatch):
+    def test_bio_command_clears_bio_with_unset(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
@@ -1571,12 +1571,34 @@ class TestBioCommand:
             bio="Old bio",
         )
 
-        response = post_webhook(client, self._make_dm("/bio"))
+        response = post_webhook(client, self._make_dm("/bio unset"))
 
         assert response.status_code == 200
         person = Person.objects.get(telegram_id=12345)
         assert person.bio == ""
         assert "cleared" in sent_messages[0][1]
+
+    def test_bio_command_shows_current_when_no_args(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            bio="My current bio",
+        )
+
+        response = post_webhook(client, self._make_dm("/bio"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == "My current bio"
+        text = sent_messages[0][1]
+        assert "My current bio" in text
+        assert "/bio unset" in text
 
     def test_bio_command_too_long(self, client, db, monkeypatch):
         sent_messages = []
@@ -1712,7 +1734,7 @@ class TestBioCommand:
         assert response.status_code == 200
         text = sent_messages[0][1]
         assert "/bio your text" in text
-        assert "/bio — clear" in text
+        assert "/bio unset" in text
 
     def test_start_with_args_shows_help(self, client, db, monkeypatch):
         sent_messages = []

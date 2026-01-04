@@ -353,11 +353,15 @@ def _handle_help_command(chat_id, person):
     lines.append("")
     privacy_status = "ON 🔒" if person.privacy else "OFF 🔓"
     lines.append(f"🛡️ *Privacy mode:* {privacy_status}")
+    if person.privacy:
+        lines.append("  You are hidden from hacka.network")
+    else:
+        lines.append("  You are listed on hacka.network for your nodes")
 
     lines.append("")
     lines.append("*Commands:*")
     lines.append("  /bio your text — set your bio")
-    lines.append("  /bio — clear your bio")
+    lines.append("  /bio unset — clear your bio")
     lines.append("  /x @username — set your X/Twitter username")
     lines.append("  /privacy on — turn privacy mode ON")
     lines.append("  /privacy off — turn privacy mode OFF")
@@ -398,9 +402,14 @@ def _handle_privacy_command(chat_id, person, text):
     parts = text.lower().split()
     if len(parts) < 2 or parts[1] not in ("on", "off"):
         current = "ON 🔒" if person.privacy else "OFF 🔓"
+        if person.privacy:
+            explanation = "You are hidden from hacka.network"
+        else:
+            explanation = "You are listed on hacka.network for your nodes"
         send(
             chat_id,
-            f"🛡️ Your privacy mode is currently *{current}*\n\n"
+            f"🛡️ Your privacy mode is currently *{current}*\n"
+            f"{explanation}\n\n"
             "Use `/privacy on` or `/privacy off` to change it.",
         )
         return
@@ -409,20 +418,33 @@ def _handle_privacy_command(chat_id, person, text):
     person.privacy = new_value
     person.save()
 
+    if new_value:
+        explanation = "You are now hidden from hacka.network"
+    else:
+        explanation = "You are now listed on hacka.network for your nodes"
     status = "ON 🔒" if new_value else "OFF 🔓"
-    send(chat_id, f"✅ Privacy mode is now *{status}*")
+    send(chat_id, f"✅ Privacy mode is now *{status}*\n{explanation}")
 
 
 def _handle_bio_command(chat_id, person, text):
     parts = text.split(maxsplit=1)
 
     if len(parts) < 2:
+        current = f"_{person.bio}_" if person.bio else "not set"
+        send(
+            chat_id,
+            f"📝 Your bio is currently: {current}\n\n"
+            "Use `/bio your text` to set it, or `/bio unset` to clear it.",
+        )
+        return
+
+    bio_text = parts[1].strip()
+
+    if bio_text.lower() == "unset":
         person.bio = ""
         person.save()
         send(chat_id, "✅ Your bio has been cleared.")
         return
-
-    bio_text = parts[1].strip()
 
     if len(bio_text) > BIO_MAX_LENGTH:
         send(
