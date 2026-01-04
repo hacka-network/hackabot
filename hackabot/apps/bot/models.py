@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 
 
@@ -82,6 +84,7 @@ class GroupPerson(models.Model):
 
 
 class Node(models.Model):
+    slug = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     group = models.ForeignKey(
         "Group", on_delete=models.CASCADE, null=True, blank=True
     )
@@ -105,6 +108,7 @@ class Node(models.Model):
     def to_dict(self):
         return dict(
             id=self.id,
+            slug=str(self.slug),
             group_id=self.group_id,
             created=self.created.isoformat(),
             established=self.established,
