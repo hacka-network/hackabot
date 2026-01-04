@@ -1,10 +1,14 @@
+import html
 import json
+import re
 from datetime import datetime, timezone
 
 from django.db.models import F
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+
+BIO_MAX_LENGTH = 500
 
 from .models import (
     ActivityDay,
@@ -242,12 +246,14 @@ def _handle_dm(message_data):
     text = message_data.get("text", "").strip()
     chat_id = chat_data["id"]
 
-    if text.startswith("/help") or text == "/start":
+    if text.startswith("/help") or text.startswith("/start"):
         _handle_help_command(chat_id, person)
     elif text.startswith("/x ") or text == "/x":
         _handle_x_command(chat_id, person, text)
     elif text.startswith("/privacy"):
         _handle_privacy_command(chat_id, person, text)
+    elif text.startswith("/bio"):
+        _handle_bio_command(chat_id, person, text)
     else:
         send(
             chat_id,
@@ -290,6 +296,8 @@ def _handle_help_command(chat_id, person):
     )
     if person.username_x:
         lines.append(f"  • X/Twitter: @{person.username_x}")
+    if person.bio:
+        lines.append(f"  • Bio: _{person.bio}_")
 
     lines.append("")
     privacy_status = "ON 🔒" if person.privacy else "OFF 🔓"
@@ -297,6 +305,8 @@ def _handle_help_command(chat_id, person):
 
     lines.append("")
     lines.append("*Commands:*")
+    lines.append("  /bio your text — set your bio")
+    lines.append("  /bio — clear your bio")
     lines.append("  /x @username — set your X/Twitter username")
     lines.append("  /privacy on — turn privacy mode ON")
     lines.append("  /privacy off — turn privacy mode OFF")
@@ -350,6 +360,47 @@ def _handle_privacy_command(chat_id, person, text):
 
     status = "ON 🔒" if new_value else "OFF 🔓"
     send(chat_id, f"✅ Privacy mode is now *{status}*")
+
+
+def _handle_bio_command(chat_id, person, text):
+    parts = text.split(maxsplit=1)
+
+    if len(parts) < 2:
+        person.bio = ""
+        person.save()
+        send(chat_id, "✅ Your bio has been cleared.")
+        return
+
+    bio_text = parts[1].strip()
+
+    if len(bio_text) > BIO_MAX_LENGTH:
+        send(
+            chat_id,
+            f"❌ Bio is too long ({len(bio_text)} characters).\n\n"
+            f"Maximum length is {BIO_MAX_LENGTH} characters.",
+        )
+        return
+
+    if "<" in bio_text or ">" in bio_text:
+        send(
+            chat_id,
+            "❌ Bio cannot contain HTML tags.",
+        )
+        return
+
+    if re.search(r"/\w+", bio_text):
+        send(
+            chat_id,
+            "❌ Bio cannot contain Telegram commands (e.g. /something).",
+        )
+        return
+
+    bio_text = html.unescape(bio_text)
+
+    person.bio = bio_text
+    person.save()
+
+    send(chat_id, f"✅ Your bio has been set to:\n\n_{bio_text}_")
 
 
 @csrf_exempt

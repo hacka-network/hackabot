@@ -25,6 +25,7 @@ class Person(models.Model):
     username = models.CharField(max_length=255, blank=True)
     privacy = models.BooleanField(default=True)
     username_x = models.CharField(max_length=255, blank=True)
+    bio = models.TextField(blank=True)
     onboarded = models.BooleanField(default=False)
 
     class Meta:
@@ -44,6 +45,7 @@ class Person(models.Model):
             username=self.username,
             privacy=self.privacy,
             username_x=self.username_x,
+            bio=self.bio,
             onboarded=self.onboarded,
         )
 

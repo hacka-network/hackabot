@@ -1523,3 +1523,235 @@ class TestOnboarding:
         assert len(sent_messages) == 1
         assert "Welcome" in sent_messages[0][1]
         assert "there" in sent_messages[0][1]
+
+
+class TestBioCommand:
+    def _make_dm(
+        self, text, user_id=12345, first_name="Alice", username="alice"
+    ):
+        return {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "from": {
+                    "id": user_id,
+                    "first_name": first_name,
+                    "username": username,
+                },
+                "chat": {"id": user_id, "type": "private"},
+                "date": 1704067200,
+                "text": text,
+            },
+        }
+
+    def test_bio_command_sets_bio(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/bio I build cool stuff"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == "I build cool stuff"
+        assert "I build cool stuff" in sent_messages[0][1]
+
+    def test_bio_command_clears_bio(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            bio="Old bio",
+        )
+
+        response = post_webhook(client, self._make_dm("/bio"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == ""
+        assert "cleared" in sent_messages[0][1]
+
+    def test_bio_command_too_long(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        long_bio = "A" * 501
+        response = post_webhook(client, self._make_dm(f"/bio {long_bio}"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == ""
+        assert "too long" in sent_messages[0][1]
+        assert "501" in sent_messages[0][1]
+        assert "500" in sent_messages[0][1]
+
+    def test_bio_command_max_length_accepted(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        bio_500 = "B" * 500
+        response = post_webhook(client, self._make_dm(f"/bio {bio_500}"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert len(person.bio) == 500
+
+    def test_bio_command_rejects_slash_commands(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client, self._make_dm("/bio Check out /mybot for more")
+        )
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == ""
+        assert "cannot contain Telegram commands" in sent_messages[0][1]
+
+    def test_bio_command_rejects_html(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client, self._make_dm("/bio I am <b>bold</b>")
+        )
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == ""
+        assert "cannot contain HTML" in sent_messages[0][1]
+
+    def test_bio_command_rejects_greater_than(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/bio 5 > 3"))
+
+        assert response.status_code == 200
+        assert "cannot contain HTML" in sent_messages[0][1]
+
+    def test_bio_command_unescapes_html_entities(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        response = post_webhook(client, self._make_dm("/bio Rock &amp; Roll"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == "Rock & Roll"
+
+    def test_bio_shown_in_help(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            username="alice",
+            bio="Building the future",
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert "Building the future" in sent_messages[0][1]
+
+    def test_bio_not_shown_when_empty(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            username="alice",
+            bio="",
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert "Bio:" not in sent_messages[0][1]
+
+    def test_help_shows_bio_commands(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "/bio your text" in text
+        assert "/bio — clear" in text
+
+    def test_start_with_args_shows_help(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/start something"))
+
+        assert response.status_code == 200
+        assert "Welcome to Hackabot" in sent_messages[0][1]
+
+    def test_bio_with_unicode_characters(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        response = post_webhook(
+            client, self._make_dm("/bio Building 🚀 rockets and ✨ dreams")
+        )
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == "Building 🚀 rockets and ✨ dreams"
+
+    def test_bio_overwrites_existing(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            bio="Old bio",
+        )
+
+        response = post_webhook(client, self._make_dm("/bio New bio"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.bio == "New bio"
