@@ -23,6 +23,8 @@ class Person(models.Model):
     is_bot = models.BooleanField(default=False)
     first_name = models.CharField(max_length=255, blank=True)
     username = models.CharField(max_length=255, blank=True)
+    privacy = models.BooleanField(default=True)
+    username_x = models.CharField(max_length=255, blank=True)
 
     class Meta:
         verbose_name_plural = "People"
@@ -39,6 +41,8 @@ class Person(models.Model):
             is_bot=self.is_bot,
             first_name=self.first_name,
             username=self.username,
+            privacy=self.privacy,
+            username_x=self.username_x,
         )
 
 
@@ -66,7 +70,9 @@ class GroupPerson(models.Model):
             created=self.created.isoformat(),
             left=self.left,
             last_message_at=(
-                self.last_message_at.isoformat() if self.last_message_at else None
+                self.last_message_at.isoformat()
+                if self.last_message_at
+                else None
             ),
         )
 

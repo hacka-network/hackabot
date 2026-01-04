@@ -145,7 +145,11 @@ class TestWebhookBasicMessage:
         assert activity.message_count == 3
         assert Message.objects.count() == 3
 
-    def test_private_chat_ignored(self, client, db):
+    def test_private_chat_does_not_store_message(
+        self, client, db, monkeypatch
+    ):
+        monkeypatch.setattr("hackabot.apps.bot.views.send", lambda *args: None)
+
         response = post_webhook(
             client,
             {
@@ -849,3 +853,353 @@ class TestWebhookEdgeCases:
 
         bot = Person.objects.get(telegram_id=888888)
         assert bot.is_bot is True
+
+
+class TestWebhookDMs:
+    def _make_dm(
+        self, text, user_id=12345, first_name="Alice", username="alice"
+    ):
+        return {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "from": {
+                    "id": user_id,
+                    "first_name": first_name,
+                    "username": username,
+                },
+                "chat": {"id": user_id, "type": "private"},
+                "date": 1704067200,
+                "text": text,
+            },
+        }
+
+    def test_dm_unrecognized_command(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("hello"))
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert sent_messages[0][0] == 12345
+        assert "/help" in sent_messages[0][1]
+
+    def test_dm_help_command(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert sent_messages[0][0] == 12345
+        text = sent_messages[0][1]
+        assert "Welcome to Hackabot" in text
+        assert "hacka.network" in text
+        assert "Privacy" in text
+        assert "/x" in text
+        assert "/privacy" in text
+
+    def test_dm_start_command_shows_help(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/start"))
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "Welcome to Hackabot" in sent_messages[0][1]
+
+    def test_dm_help_shows_nodes_for_member(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Group, GroupPerson, Node, Person
+
+        person = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert "🇬🇧 London" in sent_messages[0][1]
+
+    def test_dm_help_shows_not_in_nodes(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert "not in any" in sent_messages[0][1]
+
+    def test_dm_help_shows_privacy_status(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "Privacy mode" in text
+        assert "ON" in text
+
+    def test_dm_x_command_sets_username(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/x @james"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.username_x == "james"
+        assert "@james" in sent_messages[0][1]
+
+    def test_dm_x_command_strips_at_sign(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        post_webhook(client, self._make_dm("/x @johndoe"))
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.username_x == "johndoe"
+
+    def test_dm_x_command_without_at_sign(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        post_webhook(client, self._make_dm("/x johndoe"))
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.username_x == "johndoe"
+
+    def test_dm_x_command_no_username_provided(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/x"))
+
+        assert response.status_code == 200
+        assert "Please provide" in sent_messages[0][1]
+
+    def test_dm_x_command_empty_username(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        post_webhook(client, self._make_dm("/x @"))
+
+        assert "Please provide a valid" in sent_messages[0][1]
+
+    def test_dm_privacy_on(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Person
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=False
+        )
+
+        response = post_webhook(client, self._make_dm("/privacy on"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.privacy is True
+        assert "ON" in sent_messages[0][1]
+
+    def test_dm_privacy_off(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Person
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=True
+        )
+
+        response = post_webhook(client, self._make_dm("/privacy off"))
+
+        assert response.status_code == 200
+        person = Person.objects.get(telegram_id=12345)
+        assert person.privacy is False
+        assert "OFF" in sent_messages[0][1]
+
+    def test_dm_privacy_without_value_shows_status(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Person
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=True
+        )
+
+        response = post_webhook(client, self._make_dm("/privacy"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "currently" in text
+        assert "ON" in text
+
+    def test_dm_privacy_invalid_value_shows_status(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Person
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=False
+        )
+
+        response = post_webhook(client, self._make_dm("/privacy maybe"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "currently" in text
+        assert "OFF" in text
+
+    def test_dm_creates_person_if_not_exists(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        assert Person.objects.count() == 0
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert Person.objects.count() == 1
+        person = Person.objects.first()
+        assert person.telegram_id == 12345
+        assert person.first_name == "Alice"
+
+    def test_dm_does_not_store_message(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert Message.objects.count() == 0
+
+    def test_dm_without_user_data_ignored(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "chat": {"id": 12345, "type": "private"},
+                    "date": 1704067200,
+                    "text": "/help",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+    def test_dm_help_shows_x_username(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Person
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            username="alice",
+            username_x="alice_x",
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        assert "@alice_x" in sent_messages[0][1]
+
+    def test_dm_does_not_show_left_groups(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Group, GroupPerson, Node, Person
+
+        person = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=person, left=True)
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "London" not in text
+        assert "not in any" in text

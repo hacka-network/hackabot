@@ -11,11 +11,12 @@ from .models import (
     Group,
     GroupPerson,
     Message,
+    Node,
     Person,
     Poll,
     PollAnswer,
 )
-from .telegram import verify_webhook_secret
+from .telegram import send, verify_webhook_secret
 
 
 def _get_or_create_person(user_data):
@@ -202,6 +203,132 @@ def _handle_my_chat_member(my_chat_member_data):
     _get_or_create_group(chat_data)
 
 
+def _handle_dm(message_data):
+    chat_data = message_data.get("chat")
+    if not chat_data or chat_data.get("type") != "private":
+        return
+
+    user_data = message_data.get("from")
+    if not user_data:
+        return
+
+    person = _get_or_create_person(user_data)
+    if not person:
+        return
+
+    text = message_data.get("text", "").strip()
+    chat_id = chat_data["id"]
+
+    if text.startswith("/help") or text == "/start":
+        _handle_help_command(chat_id, person)
+    elif text.startswith("/x ") or text == "/x":
+        _handle_x_command(chat_id, person, text)
+    elif text.startswith("/privacy"):
+        _handle_privacy_command(chat_id, person, text)
+    else:
+        send(
+            chat_id,
+            "🤔 I don't recognise that command.\n\nType /help to see what I can do!",
+        )
+
+
+def _handle_help_command(chat_id, person):
+    nodes = Node.objects.filter(
+        group__groupperson__person=person,
+        group__groupperson__left=False,
+    ).distinct()
+
+    lines = [
+        "👋 *Welcome to Hackabot!*",
+        "",
+        "I'm the friendly bot for the Hacka\\* network — a global community "
+        "of hackers, makers, and builders.",
+        "",
+        "🔒 *Privacy:* I never store any of your group messages.",
+        "",
+        "🌐 For more info, visit https://hacka.network",
+        "",
+    ]
+
+    if nodes.exists():
+        lines.append("📍 *Your nodes:*")
+        for node in nodes:
+            node_name = (
+                f"{node.emoji} {node.name}" if node.emoji else node.name
+            )
+            lines.append(f"  • {node_name}")
+    else:
+        lines.append("📍 You're not in any Hacka\\* nodes yet!")
+
+    lines.append("")
+    lines.append(f"👤 *Your profile:*")
+    lines.append(
+        f"  • Telegram: @{person.username}" if person.username else ""
+    )
+    if person.username_x:
+        lines.append(f"  • X/Twitter: @{person.username_x}")
+
+    lines.append("")
+    privacy_status = "ON 🔒" if person.privacy else "OFF 🔓"
+    lines.append(f"🛡️ *Privacy mode:* {privacy_status}")
+
+    lines.append("")
+    lines.append("*Commands:*")
+    lines.append("  /x @username — set your X/Twitter username")
+    lines.append("  /privacy on — turn privacy mode ON")
+    lines.append("  /privacy off — turn privacy mode OFF")
+
+    message = "\n".join(line for line in lines if line is not None)
+    send(chat_id, message)
+
+
+def _handle_x_command(chat_id, person, text):
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        send(
+            chat_id,
+            "❌ Please provide your X/Twitter username.\n\n"
+            "Example: `/x @yourname`",
+        )
+        return
+
+    username = parts[1].strip()
+    if username.startswith("@"):
+        username = username[1:]
+
+    if not username:
+        send(
+            chat_id,
+            "❌ Please provide a valid username.\n\n"
+            "Example: `/x @yourname`",
+        )
+        return
+
+    person.username_x = username
+    person.save()
+
+    send(chat_id, f"✅ Your X/Twitter username has been set to @{username}")
+
+
+def _handle_privacy_command(chat_id, person, text):
+    parts = text.lower().split()
+    if len(parts) < 2 or parts[1] not in ("on", "off"):
+        current = "ON 🔒" if person.privacy else "OFF 🔓"
+        send(
+            chat_id,
+            f"🛡️ Your privacy mode is currently *{current}*\n\n"
+            "Use `/privacy on` or `/privacy off` to change it.",
+        )
+        return
+
+    new_value = parts[1] == "on"
+    person.privacy = new_value
+    person.save()
+
+    status = "ON 🔒" if new_value else "OFF 🔓"
+    send(chat_id, f"✅ Privacy mode is now *{status}*")
+
+
 @csrf_exempt
 @require_POST
 def telegram_webhook(request):
@@ -217,7 +344,12 @@ def telegram_webhook(request):
 
     # Handle message (includes text messages, join/leave service messages, polls)
     if "message" in data:
-        _handle_message(data["message"])
+        message_data = data["message"]
+        chat_type = message_data.get("chat", {}).get("type", "")
+        if chat_type == "private":
+            _handle_dm(message_data)
+        else:
+            _handle_message(message_data)
 
     # Handle poll state updates
     if "poll" in data:
