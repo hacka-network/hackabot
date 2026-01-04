@@ -41,7 +41,7 @@ def _get_or_create_person(user_data):
 
 
 def _onboard_new_member(person, group):
-    if person.is_bot or person.onboarded:
+    if person.is_bot:
         return
 
     if not group.node_set.exists():
@@ -409,7 +409,15 @@ def _handle_x_command(chat_id, person, text):
     person.username_x = username
     person.save()
 
-    send(chat_id, f"✅ Your X/Twitter username has been set to @{username}")
+    message = f"✅ Your X/Twitter username has been set to @{username}"
+
+    if person.privacy:
+        message += (
+            "\n\n💡 Your privacy mode is ON, so you won't appear on "
+            "hacka.network. Use `/privacy off` to be listed!"
+        )
+
+    send(chat_id, message)
 
 
 def _handle_privacy_command(chat_id, person, text):
@@ -541,7 +549,15 @@ def _handle_bio_command(chat_id, person, text):
     person.bio = bio_text
     person.save()
 
-    send(chat_id, f"✅ Your bio has been set to:\n\n_{bio_text}_")
+    message = f"✅ Your bio has been set to:\n\n_{bio_text}_"
+
+    if person.privacy:
+        message += (
+            "\n\n💡 Your privacy mode is ON, so you won't appear on "
+            "hacka.network. Use `/privacy off` to be listed!"
+        )
+
+    send(chat_id, message)
 
 
 @csrf_exempt

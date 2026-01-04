@@ -1039,6 +1039,45 @@ class TestWebhookDMs:
 
         assert "Please provide a valid" in sent_messages[0][1]
 
+    def test_dm_x_command_privacy_nudge_when_on(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Person
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=True
+        )
+
+        post_webhook(client, self._make_dm("/x @alice"))
+
+        text = sent_messages[0][1]
+        assert "privacy mode is ON" in text
+        assert "/privacy off" in text
+
+    def test_dm_x_command_no_privacy_nudge_when_off(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        from hackabot.apps.bot.models import Person
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=False
+        )
+
+        post_webhook(client, self._make_dm("/x @alice"))
+
+        text = sent_messages[0][1]
+        assert "privacy mode" not in text.lower()
+
     def test_dm_privacy_on(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
@@ -1268,7 +1307,7 @@ class TestOnboarding:
         person = Person.objects.get(telegram_id=12345)
         assert person.onboarded is True
 
-    def test_already_onboarded_member_no_welcome(
+    def test_already_onboarded_member_gets_welcome(
         self, client, db, monkeypatch
     ):
         sent_messages = []
@@ -1283,6 +1322,12 @@ class TestOnboarding:
             username="alice",
             onboarded=True,
         )
+
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
 
         response = post_webhook(
             client,
@@ -1309,7 +1354,8 @@ class TestOnboarding:
         )
 
         assert response.status_code == 200
-        assert len(sent_messages) == 0
+        assert len(sent_messages) == 1
+        assert "Welcome" in sent_messages[0][1]
 
     def test_bot_member_not_onboarded(self, client, db, monkeypatch):
         sent_messages = []
@@ -1471,7 +1517,7 @@ class TestOnboarding:
         assert response.status_code == 200
         assert len(sent_messages) == 0
 
-    def test_member_joining_second_group_no_welcome(
+    def test_member_joining_second_group_gets_welcome(
         self, client, db, monkeypatch
     ):
         sent_messages = []
@@ -1485,6 +1531,12 @@ class TestOnboarding:
             first_name="Alice",
             onboarded=True,
         )
+
+        group = Group.objects.create(
+            telegram_id=-1009999888777,
+            display_name="Second Group",
+        )
+        Node.objects.create(name="Second Node", group=group)
 
         response = post_webhook(
             client,
@@ -1507,7 +1559,8 @@ class TestOnboarding:
         )
 
         assert response.status_code == 200
-        assert len(sent_messages) == 0
+        assert len(sent_messages) == 1
+        assert "Welcome" in sent_messages[0][1]
 
     def test_member_without_first_name_gets_generic_welcome(
         self, client, db, monkeypatch
@@ -1844,6 +1897,41 @@ class TestBioCommand:
         assert response.status_code == 200
         person = Person.objects.get(telegram_id=12345)
         assert person.bio == "New bio"
+
+    def test_bio_command_privacy_nudge_when_on(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=True
+        )
+
+        post_webhook(client, self._make_dm("/bio Building cool stuff"))
+
+        text = sent_messages[0][1]
+        assert "privacy mode is ON" in text
+        assert "/privacy off" in text
+
+    def test_bio_command_no_privacy_nudge_when_off(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345, first_name="Alice", privacy=False
+        )
+
+        post_webhook(client, self._make_dm("/bio Building cool stuff"))
+
+        text = sent_messages[0][1]
+        assert "privacy mode" not in text.lower()
 
 
 class TestPeopleCommand:
