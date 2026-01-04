@@ -481,7 +481,9 @@ def _handle_people_command(chat_id, person):
             name = p.first_name or "Unknown"
             parts = [f"  • {name}"]
             if p.username_x:
-                parts.append(f"[@{p.username_x}](https://x.com/{p.username_x})")
+                parts.append(
+                    f"[@{p.username_x}](https://x.com/{p.username_x})"
+                )
             lines.append(" ".join(parts))
             if p.bio:
                 lines.append(f"    _{p.bio}_")
@@ -688,7 +690,9 @@ def api_nodes(request):
             activity_level=_calculate_activity_level(node),
         )
         nodes_data.append(node_data)
-        node_attending_map[node.id] = _get_this_weeks_attending_person_ids(node)
+        node_attending_map[node.id] = _get_this_weeks_attending_person_ids(
+            node
+        )
 
     people = (
         Person.objects.filter(
@@ -713,10 +717,12 @@ def api_nodes(request):
                 attending = person.id in node_attending_map.get(node.id, set())
                 if attending:
                     is_attending_any = True
-                person_nodes.append(dict(
-                    id=str(node.slug),
-                    attending=attending,
-                ))
+                person_nodes.append(
+                    dict(
+                        id=str(node.slug),
+                        attending=attending,
+                    )
+                )
 
         if not person_nodes:
             continue
@@ -729,7 +735,9 @@ def api_nodes(request):
         if person.bio:
             person_data["bio"] = person.bio
 
-        people_data.append((is_attending_any, person.first_name.lower(), person_data))
+        people_data.append(
+            (is_attending_any, person.first_name.lower(), person_data)
+        )
 
     people_data.sort(key=lambda x: (not x[0], x[1]))
     people_list = [p[2] for p in people_data]
