@@ -43,6 +43,13 @@ def _onboard_new_member(person, group):
     if person.is_bot or person.onboarded:
         return
 
+    if not group.node_set.exists():
+        print(
+            f"⏭️ Skipping onboard for {person.first_name} - "
+            f"{group.display_name} has no Node"
+        )
+        return
+
     print(
         f"🎉 Onboarding new member: {person.first_name} in {group.display_name}"
     )
@@ -304,6 +311,9 @@ def _handle_dm(message_data):
     elif text.startswith("/bio"):
         print("📩 Processing /bio command")
         _handle_bio_command(chat_id, person, text)
+    elif text.startswith("/people"):
+        print("📩 Processing /people command")
+        _handle_people_command(chat_id, person)
     else:
         print("📩 Unknown command, sending help prompt")
         send(
@@ -365,6 +375,7 @@ def _handle_help_command(chat_id, person):
     lines.append("  /x @username — set your X/Twitter username")
     lines.append("  /privacy on — turn privacy mode ON")
     lines.append("  /privacy off — turn privacy mode OFF")
+    lines.append("  /people — list people in your nodes")
 
     message = "\n".join(line for line in lines if line is not None)
     send(chat_id, message)
@@ -424,6 +435,58 @@ def _handle_privacy_command(chat_id, person, text):
         explanation = "You are now listed on hacka.network for your nodes"
     status = "ON 🔒" if new_value else "OFF 🔓"
     send(chat_id, f"✅ Privacy mode is now *{status}*\n{explanation}")
+
+
+def _handle_people_command(chat_id, person):
+    nodes = Node.objects.filter(
+        group__groupperson__person=person,
+        group__groupperson__left=False,
+    ).distinct()
+
+    if not nodes.exists():
+        send(chat_id, "📍 You're not in any Hacka\\* nodes yet!")
+        return
+
+    lines = ["👥 *People in your nodes:*", ""]
+
+    for node in nodes:
+        node_name = f"{node.emoji} {node.name}" if node.emoji else node.name
+        lines.append(f"*{node_name}*")
+
+        if not node.group:
+            lines.append("  _No group linked_")
+            lines.append("")
+            continue
+
+        people = (
+            Person.objects.filter(
+                groupperson__group=node.group,
+                groupperson__left=False,
+                privacy=False,
+            )
+            .filter(Q(first_name__gt="") | Q(username_x__gt=""))
+            .distinct()
+            .order_by("first_name")
+        )
+
+        if not people.exists():
+            lines.append("  _No public profiles yet_")
+            lines.append("")
+            continue
+
+        for p in people:
+            name = p.first_name or "Unknown"
+            parts = [f"  • {name}"]
+            if p.username_x:
+                parts.append(f"[@{p.username_x}](https://x.com/{p.username_x})")
+            lines.append(" ".join(parts))
+            if p.bio:
+                lines.append(f"    _{p.bio}_")
+
+        lines.append("")
+
+    lines.append("_Only showing people with privacy mode OFF_")
+    send(chat_id, "\n".join(lines))
 
 
 def _handle_bio_command(chat_id, person, text):

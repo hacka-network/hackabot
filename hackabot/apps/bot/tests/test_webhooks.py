@@ -8,6 +8,7 @@ from hackabot.apps.bot.models import (
     Group,
     GroupPerson,
     Message,
+    Node,
     Person,
     Poll,
     PollAnswer,
@@ -1225,6 +1226,12 @@ class TestOnboarding:
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
         response = post_webhook(
             client,
             {
@@ -1350,6 +1357,12 @@ class TestOnboarding:
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
         response = post_webhook(
             client,
             {
@@ -1390,6 +1403,12 @@ class TestOnboarding:
             "hackabot.apps.bot.views.send",
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
+
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
 
         response = post_webhook(
             client,
@@ -1499,6 +1518,12 @@ class TestOnboarding:
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
         response = post_webhook(
             client,
             {
@@ -1523,6 +1548,48 @@ class TestOnboarding:
         assert len(sent_messages) == 1
         assert "Welcome" in sent_messages[0][1]
         assert "there" in sent_messages[0][1]
+
+    def test_new_member_no_welcome_when_no_node(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group Without Node",
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Test Group Without Node",
+                    },
+                    "date": 1704067200,
+                    "new_chat_members": [
+                        {
+                            "id": 12345,
+                            "first_name": "Alice",
+                            "username": "alice",
+                        },
+                    ],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.onboarded is False
 
 
 class TestBioCommand:
@@ -1777,3 +1844,239 @@ class TestBioCommand:
         assert response.status_code == 200
         person = Person.objects.get(telegram_id=12345)
         assert person.bio == "New bio"
+
+
+class TestPeopleCommand:
+    def _make_dm(
+        self, text, user_id=12345, first_name="Alice", username="alice"
+    ):
+        return {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "from": {
+                    "id": user_id,
+                    "first_name": first_name,
+                    "username": username,
+                },
+                "chat": {"id": user_id, "type": "private"},
+                "date": 1704067200,
+                "text": text,
+            },
+        }
+
+    def test_people_command_not_in_any_nodes(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "not in any" in sent_messages[0][1]
+
+    def test_people_command_shows_public_people(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        alice = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        bob = Person.objects.create(
+            telegram_id=67890,
+            first_name="Bob",
+            username="bob",
+            privacy=False,
+            username_x="bobx",
+            bio="Building cool stuff",
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=alice, left=False)
+        GroupPerson.objects.create(group=group, person=bob, left=False)
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "London" in text
+        assert "Bob" in text
+        assert "@bobx" in text
+        assert "Building cool stuff" in text
+
+    def test_people_command_excludes_private_people(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        alice = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        bob = Person.objects.create(
+            telegram_id=67890,
+            first_name="Bob",
+            username="bob",
+            privacy=True,
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=alice, left=False)
+        GroupPerson.objects.create(group=group, person=bob, left=False)
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "Bob" not in text
+        assert "No public profiles" in text
+
+    def test_people_command_includes_self(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        alice = Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            username="alice",
+            privacy=False,
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=alice, left=False)
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "Alice" in text
+
+    def test_people_command_excludes_left_members(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        alice = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        bob = Person.objects.create(
+            telegram_id=67890,
+            first_name="Bob",
+            username="bob",
+            privacy=False,
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=alice, left=False)
+        GroupPerson.objects.create(group=group, person=bob, left=True)
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "Bob" not in text
+
+    def test_people_command_multiple_nodes(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        alice = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        bob = Person.objects.create(
+            telegram_id=67890,
+            first_name="Bob",
+            privacy=False,
+        )
+        carol = Person.objects.create(
+            telegram_id=11111,
+            first_name="Carol",
+            privacy=False,
+        )
+
+        group1 = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group 1"
+        )
+        group2 = Group.objects.create(
+            telegram_id=-100456, display_name="Test Group 2"
+        )
+        Node.objects.create(group=group1, name="London", emoji="🇬🇧")
+        Node.objects.create(group=group2, name="Paris", emoji="🇫🇷")
+
+        GroupPerson.objects.create(group=group1, person=alice, left=False)
+        GroupPerson.objects.create(group=group1, person=bob, left=False)
+        GroupPerson.objects.create(group=group2, person=alice, left=False)
+        GroupPerson.objects.create(group=group2, person=carol, left=False)
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "London" in text
+        assert "Paris" in text
+        assert "Bob" in text
+        assert "Carol" in text
+
+    def test_people_command_shows_footer(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        alice = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=alice, left=False)
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "privacy mode OFF" in text
+
+    def test_help_shows_people_command(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "/people" in text
