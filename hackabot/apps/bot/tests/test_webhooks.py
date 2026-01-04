@@ -308,7 +308,11 @@ class TestWebhookBasicMessage:
 
 
 class TestWebhookJoinLeave:
-    def test_new_chat_members(self, client, db):
+    def test_new_chat_members(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
         response = post_webhook(
             client,
             {
@@ -370,7 +374,11 @@ class TestWebhookJoinLeave:
         gp = GroupPerson.objects.get(group=group, person=person)
         assert gp.left is True
 
-    def test_chat_member_update_join(self, client, db):
+    def test_chat_member_update_join(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
         response = post_webhook(
             client,
             {
@@ -449,7 +457,11 @@ class TestWebhookJoinLeave:
         gp = GroupPerson.objects.get(group=group, person=person)
         assert gp.left is True
 
-    def test_chat_member_administrator_not_left(self, client, db):
+    def test_chat_member_administrator_not_left(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send", lambda chat_id, text: None
+        )
+
         response = post_webhook(
             client,
             {
@@ -1203,3 +1215,311 @@ class TestWebhookDMs:
         text = sent_messages[0][1]
         assert "London" not in text
         assert "not in any" in text
+
+
+class TestOnboarding:
+    def test_new_member_gets_welcome_message(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Test Group",
+                    },
+                    "date": 1704067200,
+                    "new_chat_members": [
+                        {
+                            "id": 12345,
+                            "first_name": "Alice",
+                            "username": "alice",
+                        },
+                    ],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        chat_id, text = sent_messages[0]
+        assert chat_id == -1001234567890
+        assert "Welcome" in text
+        assert "Alice" in text
+        assert "Introduce yourself" in text
+        assert "DM me to set up your profile" in text
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.onboarded is True
+
+    def test_already_onboarded_member_no_welcome(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            username="alice",
+            onboarded=True,
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Test Group",
+                    },
+                    "date": 1704067200,
+                    "new_chat_members": [
+                        {
+                            "id": 12345,
+                            "first_name": "Alice",
+                            "username": "alice",
+                        },
+                    ],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+    def test_bot_member_not_onboarded(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Test Group",
+                    },
+                    "date": 1704067200,
+                    "new_chat_members": [
+                        {
+                            "id": 888888,
+                            "first_name": "ABot",
+                            "is_bot": True,
+                        },
+                    ],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+        bot = Person.objects.get(telegram_id=888888)
+        assert bot.onboarded is False
+
+    def test_multiple_new_members_each_get_welcome(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Test Group",
+                    },
+                    "date": 1704067200,
+                    "new_chat_members": [
+                        {"id": 12345, "first_name": "Alice"},
+                        {"id": 67890, "first_name": "Bob"},
+                    ],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 2
+
+        assert "Alice" in sent_messages[0][1]
+        assert "Bob" in sent_messages[1][1]
+
+        alice = Person.objects.get(telegram_id=12345)
+        bob = Person.objects.get(telegram_id=67890)
+        assert alice.onboarded is True
+        assert bob.onboarded is True
+
+    def test_chat_member_update_join_triggers_onboarding(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "chat_member": {
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Test Group",
+                    },
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "date": 1704067200,
+                    "new_chat_member": {
+                        "user": {"id": 12345, "first_name": "Alice"},
+                        "status": "member",
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "Welcome" in sent_messages[0][1]
+        assert "Alice" in sent_messages[0][1]
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.onboarded is True
+
+    def test_chat_member_update_left_no_onboarding(
+        self, client, db, group, person, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "chat_member": {
+                    "chat": {"id": group.telegram_id, "type": "supergroup"},
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "date": 1704067200,
+                    "new_chat_member": {
+                        "user": {
+                            "id": person.telegram_id,
+                            "first_name": person.first_name,
+                        },
+                        "status": "left",
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+    def test_member_joining_second_group_no_welcome(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Person.objects.create(
+            telegram_id=12345,
+            first_name="Alice",
+            onboarded=True,
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "chat": {
+                        "id": -1009999888777,
+                        "type": "supergroup",
+                        "title": "Second Group",
+                    },
+                    "date": 1704067200,
+                    "new_chat_members": [
+                        {"id": 12345, "first_name": "Alice"},
+                    ],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+    def test_member_without_first_name_gets_generic_welcome(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Test Group",
+                    },
+                    "date": 1704067200,
+                    "new_chat_members": [
+                        {"id": 12345},
+                    ],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "Welcome" in sent_messages[0][1]
+        assert "there" in sent_messages[0][1]

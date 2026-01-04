@@ -33,6 +33,25 @@ def _get_or_create_person(user_data):
     return person
 
 
+def _onboard_new_member(person, group):
+    if person.is_bot or person.onboarded:
+        return
+
+    name = person.first_name or "there"
+    mention = f"[{name}](tg://user?id={person.telegram_id})"
+
+    message = (
+        f"👋 Welcome {mention}! "
+        "Introduce yourself — what are you building? "
+        "(DM me to set up your profile)"
+    )
+
+    send(group.telegram_id, message)
+
+    person.onboarded = True
+    person.save()
+
+
 def _get_or_create_group(chat_data):
     if not chat_data:
         return None
@@ -64,6 +83,7 @@ def _handle_message(message_data):
                 person=person,
                 defaults=dict(left=False),
             )
+            _onboard_new_member(person, group)
 
     # Handle leave events
     left_member = message_data.get("left_chat_member")
@@ -196,6 +216,9 @@ def _handle_chat_member(chat_member_data):
         person=person,
         defaults=dict(left=left),
     )
+
+    if not left:
+        _onboard_new_member(person, group)
 
 
 def _handle_my_chat_member(my_chat_member_data):
