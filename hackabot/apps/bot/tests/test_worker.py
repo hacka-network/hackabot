@@ -207,6 +207,196 @@ class TestProcessNodeEvents:
         assert len(responses.calls) == 0
 
 
+class TestEventReminderMessages:
+    @responses.activate
+    def test_intros_reminder_message(self, node, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            event = Event.objects.create(
+                node=node, type="intros", time=time(9, 30), where="Main Hall"
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            thursday_930am = arrow.Arrow(
+                2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
+            )
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = thursday_930am
+                process_node_events(node)
+
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Intros are at 9:30am" in request_body
+
+    @responses.activate
+    def test_demos_reminder_message(self, node, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            event = Event.objects.create(
+                node=node, type="demos", time=time(16, 0), where="Demo Stage"
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            thursday_4pm = arrow.Arrow(
+                2024, 1, 11, 16, 0, 0, tzinfo="America/New_York"
+            )
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = thursday_4pm
+                process_node_events(node)
+
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Demos are at 4pm" in request_body
+
+    @responses.activate
+    def test_lunch_reminder_with_location(self, node, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            event = Event.objects.create(
+                node=node, type="lunch", time=time(12, 0), where="Cafeteria"
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            thursday_noon = arrow.Arrow(
+                2024, 1, 11, 12, 0, 0, tzinfo="America/New_York"
+            )
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = thursday_noon
+                process_node_events(node)
+
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Lunch at 12pm" in request_body
+            assert "Cafeteria" in request_body
+
+    @responses.activate
+    def test_lunch_reminder_without_location(self, node, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            event = Event.objects.create(
+                node=node, type="lunch", time=time(12, 30), where=""
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            thursday_1230 = arrow.Arrow(
+                2024, 1, 11, 12, 30, 0, tzinfo="America/New_York"
+            )
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = thursday_1230
+                process_node_events(node)
+
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Lunch at 12:30pm" in request_body
+            assert "in" not in request_body
+
+    @responses.activate
+    def test_drinks_reminder_with_location(self, node, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            event = Event.objects.create(
+                node=node, type="drinks", time=time(18, 0), where="Rooftop Bar"
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            thursday_6pm = arrow.Arrow(
+                2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
+            )
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = thursday_6pm
+                process_node_events(node)
+
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Rooftop Bar" in request_body
+
+    @responses.activate
+    def test_drinks_reminder_without_location(self, node, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            event = Event.objects.create(
+                node=node, type="drinks", time=time(18, 30), where=""
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            thursday_630pm = arrow.Arrow(
+                2024, 1, 11, 18, 30, 0, tzinfo="America/New_York"
+            )
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = thursday_630pm
+                process_node_events(node)
+
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Drinks time" in request_body
+
+
 class TestCheckAllNodes:
     @responses.activate
     def test_processes_all_nodes_with_groups(self, db, group):
