@@ -1,4 +1,4 @@
-# Development rules for swellbot
+# Development rules for hackabot
 
 ## General rules
 
@@ -50,9 +50,8 @@ And NEVER a direct reference to the model class like this:
 ## Coding style
 
 - Match the existing coding style as closely as possible.
-- For Python, this applies to Django models, views, serializers, etc.
+- This applies to Django models, views, serializers, etc.
 - Look around the codebase for examples of how to do things.
-- For Javascript, this applies to React components, hooks, etc.
 
 ## Testing
 
