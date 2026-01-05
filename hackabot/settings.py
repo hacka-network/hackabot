@@ -71,11 +71,12 @@ TEMPLATES = [
 ASGI_APPLICATION = "hackabot.asgi.application"
 
 # Database
+# SSL is disabled because we connect through pgbouncer in production
 if IS_PRODUCTION:
     import dj_database_url
 
     DATABASES = {
-        "default": dj_database_url.config(conn_max_age=600, ssl_require=True)
+        "default": dj_database_url.config(conn_max_age=600, ssl_require=False)
     }
 else:
     DATABASES = {
