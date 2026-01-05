@@ -10,6 +10,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_WEBHOOK_URL = os.environ.get("TELEGRAM_WEBHOOK_URL", "")
 TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 TELEGRAM_API_BASE = "https://api.telegram.org"
+HACKA_NETWORK_GLOBAL_CHAT_ID = "-1002257954378"
 
 ALLOWED_UPDATES = ["message", "poll", "poll_answer", "chat_member"]
 
@@ -184,3 +185,73 @@ def send_event_reminder(event):
             send(chat_id, "🍺🍻🍷  Drinks time — let's go!")
 
     print(f"✅ Event reminder sent for {event.type}")
+
+
+def send_weekly_attendance_summary():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from .models import Group, PollAnswer
+
+    print("📊 Preparing weekly attendance summary...")
+
+    try:
+        global_group = Group.objects.get(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID)
+        )
+    except Group.DoesNotExist:
+        print("❌ Global group not found, skipping weekly summary")
+        return False
+
+    one_week_ago = timezone.now() - timedelta(days=7)
+    yes_answers = PollAnswer.objects.filter(
+        yes=True,
+        poll__created__gte=one_week_ago,
+        poll__node__isnull=False,
+    ).select_related("poll__node", "person")
+
+    node_attendance = {}
+    all_person_ids = set()
+
+    for answer in yes_answers:
+        node = answer.poll.node
+        if node.id not in node_attendance:
+            node_attendance[node.id] = dict(
+                node=node,
+                person_ids=set(),
+            )
+        node_attendance[node.id]["person_ids"].add(answer.person_id)
+        all_person_ids.add(answer.person_id)
+
+    nodes_with_attendance = [
+        data for data in node_attendance.values() if len(data["person_ids"]) > 0
+    ]
+
+    if not nodes_with_attendance:
+        print("📊 No attendance this week, skipping summary")
+        return False
+
+    total_attendees = len(all_person_ids)
+    lines = [f"📊 *Hacka\\* Network Weekly Attendance*"]
+    lines.append("")
+    lines.append(f"🌍 *{total_attendees} people* joined across the network!")
+    lines.append("")
+
+    nodes_with_attendance.sort(
+        key=lambda x: len(x["person_ids"]),
+        reverse=True,
+    )
+
+    for data in nodes_with_attendance:
+        node = data["node"]
+        count = len(data["person_ids"])
+        name = f"{node.emoji} {node.name}" if node.emoji else node.name
+        lines.append(f"• {name}: {count}")
+
+    message = "\n".join(lines)
+
+    print(f"📤 Sending weekly summary to global group {global_group.telegram_id}")
+    send(global_group.telegram_id, message)
+    print("✅ Weekly attendance summary sent")
+    return True

@@ -7,6 +7,7 @@ class Group(models.Model):
     telegram_id = models.BigIntegerField(unique=True)
     display_name = models.CharField(max_length=255, blank=True)
     created = models.DateTimeField(auto_now_add=True)
+    last_weekly_summary_sent_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.display_name or str(self.telegram_id)
@@ -17,6 +18,11 @@ class Group(models.Model):
             telegram_id=self.telegram_id,
             display_name=self.display_name,
             created=self.created.isoformat(),
+            last_weekly_summary_sent_at=(
+                self.last_weekly_summary_sent_at.isoformat()
+                if self.last_weekly_summary_sent_at
+                else None
+            ),
         )
 
 

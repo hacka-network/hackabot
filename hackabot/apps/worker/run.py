@@ -6,8 +6,10 @@ import sentry_sdk
 from django.utils import timezone
 
 from hackabot.apps.bot.telegram import (
+    HACKA_NETWORK_GLOBAL_CHAT_ID,
     send_event_reminder,
     send_poll,
+    send_weekly_attendance_summary,
     verify_webhook,
 )
 
@@ -17,6 +19,9 @@ POLL_MINUTE = 0
 POLL_TIMEZONE = "UTC"  # All polls sent at 7am UTC (= 3pm Bali)
 EVENT_DAY = 3  # Thursday
 REMINDER_MINUTES_BEFORE = 30
+SUMMARY_DAY = 4  # Friday
+SUMMARY_HOUR = 7
+SUMMARY_MINUTE = 0
 
 
 def should_send_poll(node, now_utc):
@@ -97,6 +102,51 @@ def process_node_events(node):
                 sentry_sdk.capture_exception(e)
 
 
+def should_send_weekly_summary(global_group, now_utc):
+    if now_utc.weekday() != SUMMARY_DAY:
+        return False
+
+    if now_utc.hour != SUMMARY_HOUR:
+        return False
+
+    if now_utc.minute != SUMMARY_MINUTE:
+        return False
+
+    if global_group.last_weekly_summary_sent_at:
+        days_since = (
+            timezone.now() - global_group.last_weekly_summary_sent_at
+        ).days
+        if days_since < 6:
+            return False
+
+    return True
+
+
+def process_weekly_summary():
+    from hackabot.apps.bot.models import Group
+
+    now_utc = arrow.now(POLL_TIMEZONE)
+
+    try:
+        global_group = Group.objects.get(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID)
+        )
+    except Group.DoesNotExist:
+        return
+
+    if should_send_weekly_summary(global_group, now_utc):
+        print("📊 Time to send weekly attendance summary")
+        try:
+            result = send_weekly_attendance_summary()
+            if result:
+                global_group.last_weekly_summary_sent_at = timezone.now()
+                global_group.save(update_fields=["last_weekly_summary_sent_at"])
+                print("✅ Weekly summary sent and timestamp updated")
+        except Exception as e:
+            print(f"❌ Error sending weekly summary: {e}")
+            sentry_sdk.capture_exception(e)
+
+
 def check_all_nodes():
     from hackabot.apps.bot.models import Node
 
@@ -105,6 +155,8 @@ def check_all_nodes():
     for node in nodes:
         process_node_poll(node)
         process_node_events(node)
+
+    process_weekly_summary()
 
 
 def run_worker():

@@ -7,18 +7,26 @@ import pytest
 import responses
 from django.utils import timezone
 
-from hackabot.apps.bot.models import Event, Node
-from hackabot.apps.bot.telegram import TELEGRAM_API_BASE
+from hackabot.apps.bot.models import Event, Group, Node, Person, Poll, PollAnswer
+from hackabot.apps.bot.telegram import (
+    HACKA_NETWORK_GLOBAL_CHAT_ID,
+    TELEGRAM_API_BASE,
+)
 from hackabot.apps.worker.run import (
     POLL_DAY,
     POLL_HOUR,
     POLL_MINUTE,
     EVENT_DAY,
+    SUMMARY_DAY,
+    SUMMARY_HOUR,
+    SUMMARY_MINUTE,
     check_all_nodes,
     process_node_events,
     process_node_poll,
+    process_weekly_summary,
     should_send_event_reminder,
     should_send_poll,
+    should_send_weekly_summary,
 )
 
 
@@ -586,3 +594,228 @@ class TestDynamicNodeHandling:
             new_node.refresh_from_db()
             assert new_node.last_poll_sent_at is not None
             assert len(responses.calls) == 3
+
+
+class TestShouldSendWeeklySummary:
+    @pytest.fixture
+    def global_group(self, db):
+        return Group.objects.create(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID),
+            display_name="Hacka* Network Global",
+        )
+
+    def test_returns_true_on_friday_at_correct_time(self, global_group):
+        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_7am_utc) is True
+
+    def test_returns_false_on_wrong_day(self, global_group):
+        thursday_7am_utc = arrow.Arrow(2024, 1, 11, 7, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, thursday_7am_utc) is False
+
+    def test_returns_false_on_wrong_hour(self, global_group):
+        friday_8am_utc = arrow.Arrow(2024, 1, 12, 8, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_8am_utc) is False
+
+    def test_returns_false_on_wrong_minute(self, global_group):
+        friday_7_30am_utc = arrow.Arrow(2024, 1, 12, 7, 30, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_7_30am_utc) is False
+
+    def test_returns_false_if_summary_sent_recently(self, global_group):
+        global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(days=3)
+        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_7am_utc) is False
+
+    def test_returns_true_if_summary_sent_over_6_days_ago(self, global_group):
+        global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(days=7)
+        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_7am_utc) is True
+
+    def test_returns_true_if_never_sent_summary(self, global_group):
+        global_group.last_weekly_summary_sent_at = None
+        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_7am_utc) is True
+
+
+class TestProcessWeeklySummary:
+    @pytest.fixture
+    def global_group(self, db):
+        return Group.objects.create(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID),
+            display_name="Hacka* Network Global",
+        )
+
+    @pytest.fixture
+    def node_with_attendance(self, db, group):
+        node = Node.objects.create(
+            group=group,
+            name="Test Node",
+            emoji="🚀",
+            timezone="UTC",
+        )
+        poll = Poll.objects.create(
+            telegram_id="poll_summary_test",
+            node=node,
+            question="Who's coming?",
+        )
+        person = Person.objects.create(
+            telegram_id=99999,
+            first_name="TestPerson",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
+        return node
+
+    @responses.activate
+    def test_sends_summary_and_updates_timestamp(
+        self, global_group, node_with_attendance
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = friday_7am_utc
+                process_weekly_summary()
+
+            global_group.refresh_from_db()
+            assert global_group.last_weekly_summary_sent_at is not None
+            assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_does_not_send_summary_on_wrong_day(self, global_group):
+        thursday_7am_utc = arrow.Arrow(2024, 1, 11, 7, 0, 0, tzinfo="UTC")
+        with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+            mock_arrow.now.return_value = thursday_7am_utc
+            process_weekly_summary()
+
+        global_group.refresh_from_db()
+        assert global_group.last_weekly_summary_sent_at is None
+        assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_does_not_send_if_global_group_missing(self, db):
+        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+        with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+            mock_arrow.now.return_value = friday_7am_utc
+            process_weekly_summary()
+
+        assert len(responses.calls) == 0
+
+
+class TestWeeklySummaryMessage:
+    @pytest.fixture
+    def global_group(self, db):
+        return Group.objects.create(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID),
+            display_name="Hacka* Network Global",
+        )
+
+    @responses.activate
+    def test_summary_includes_total_count_and_nodes(self, db, global_group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node_group = Group.objects.create(
+                telegram_id=-1009999999,
+                display_name="Node Group",
+            )
+            node = Node.objects.create(
+                group=node_group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_msg_test",
+                node=node,
+                question="Who's coming?",
+            )
+            person1 = Person.objects.create(telegram_id=11111, first_name="Alice")
+            person2 = Person.objects.create(telegram_id=22222, first_name="Bob")
+            PollAnswer.objects.create(poll=poll, person=person1, yes=True)
+            PollAnswer.objects.create(poll=poll, person=person2, yes=True)
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = friday_7am_utc
+                process_weekly_summary()
+
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "2 people" in request_body
+            assert "Bali" in request_body
+
+    @responses.activate
+    def test_summary_not_sent_if_no_attendance(self, db, global_group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = friday_7am_utc
+                process_weekly_summary()
+
+            global_group.refresh_from_db()
+            assert global_group.last_weekly_summary_sent_at is None
+            assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_summary_only_includes_nodes_with_attendance(self, db, global_group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            group1 = Group.objects.create(telegram_id=-1008888888)
+            group2 = Group.objects.create(telegram_id=-1007777777)
+
+            node1 = Node.objects.create(
+                group=group1, name="Active Node", emoji="✅", timezone="UTC"
+            )
+            Node.objects.create(
+                group=group2, name="Empty Node", emoji="❌", timezone="UTC"
+            )
+
+            poll = Poll.objects.create(
+                telegram_id="poll_active",
+                node=node1,
+                question="Who's coming?",
+            )
+            person = Person.objects.create(telegram_id=33333, first_name="Charlie")
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = friday_7am_utc
+                process_weekly_summary()
+
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Active Node" in request_body
+            assert "Empty Node" not in request_body
