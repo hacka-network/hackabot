@@ -101,14 +101,14 @@ def run_worker():
 
     verify_webhook()
 
-    print("Worker will check for tasks every minute...")
+    print("Worker will check for tasks every 30 seconds...")
 
     while 1:
         try:
             check_all_nodes()
-            time.sleep(60)
+            time.sleep(30)
         except Exception as e:
             print("--- Worker error ---")
             print(traceback.format_exc())
             sentry_sdk.capture_exception(e)
-            time.sleep(60)
+            time.sleep(30)
