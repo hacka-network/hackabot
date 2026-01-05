@@ -2224,6 +2224,7 @@ class TestPeopleCommand:
         assert "/people" in text
 
 
+@pytest.mark.skip(reason="/nodes feature disabled")
 class TestNodesCommand:
     def _make_dm(
         self, text, user_id=12345, first_name="Alice", username="alice"
