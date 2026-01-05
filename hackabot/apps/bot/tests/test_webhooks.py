@@ -1277,7 +1277,7 @@ class TestWebhookDMs:
         response = post_webhook(client, self._make_dm("/help"))
 
         assert response.status_code == 200
-        assert "@alice_x" in sent_messages[0][1]
+        assert "@alice\\_x" in sent_messages[0][1]
 
     def test_dm_left_member_gets_join_prompt(self, client, db, monkeypatch):
         sent_messages = []
@@ -1324,22 +1324,22 @@ class TestOnboarding:
             client,
             {
                 "update_id": 1001,
-                "message": {
-                    "message_id": 1,
-                    "from": {"id": 11111, "first_name": "Admin"},
+                "chat_member": {
                     "chat": {
                         "id": -1001234567890,
                         "type": "supergroup",
                         "title": "Test Group",
                     },
+                    "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
-                    "new_chat_members": [
-                        {
+                    "new_chat_member": {
+                        "user": {
                             "id": 12345,
                             "first_name": "Alice",
                             "username": "alice",
                         },
-                    ],
+                        "status": "member",
+                    },
                 },
             },
         )
@@ -1382,22 +1382,22 @@ class TestOnboarding:
             client,
             {
                 "update_id": 1001,
-                "message": {
-                    "message_id": 1,
-                    "from": {"id": 11111, "first_name": "Admin"},
+                "chat_member": {
                     "chat": {
                         "id": -1001234567890,
                         "type": "supergroup",
                         "title": "Test Group",
                     },
+                    "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
-                    "new_chat_members": [
-                        {
+                    "new_chat_member": {
+                        "user": {
                             "id": 12345,
                             "first_name": "Alice",
                             "username": "alice",
                         },
-                    ],
+                        "status": "member",
+                    },
                 },
             },
         )
@@ -1443,7 +1443,7 @@ class TestOnboarding:
         bot = Person.objects.get(telegram_id=888888)
         assert bot.onboarded is False
 
-    def test_multiple_new_members_each_get_welcome(
+    def test_new_chat_members_creates_records_but_no_welcome(
         self, client, db, monkeypatch
     ):
         sent_messages = []
@@ -1480,15 +1480,12 @@ class TestOnboarding:
         )
 
         assert response.status_code == 200
-        assert len(sent_messages) == 2
-
-        assert "Alice" in sent_messages[0][1]
-        assert "Bob" in sent_messages[1][1]
+        assert len(sent_messages) == 0
 
         alice = Person.objects.get(telegram_id=12345)
         bob = Person.objects.get(telegram_id=67890)
-        assert alice.onboarded is True
-        assert bob.onboarded is True
+        assert GroupPerson.objects.filter(group=group, person=alice).exists()
+        assert GroupPerson.objects.filter(group=group, person=bob).exists()
 
     def test_chat_member_update_join_triggers_onboarding(
         self, client, db, monkeypatch
@@ -1591,18 +1588,18 @@ class TestOnboarding:
             client,
             {
                 "update_id": 1001,
-                "message": {
-                    "message_id": 1,
-                    "from": {"id": 11111, "first_name": "Admin"},
+                "chat_member": {
                     "chat": {
                         "id": -1009999888777,
                         "type": "supergroup",
                         "title": "Second Group",
                     },
+                    "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
-                    "new_chat_members": [
-                        {"id": 12345, "first_name": "Alice"},
-                    ],
+                    "new_chat_member": {
+                        "user": {"id": 12345, "first_name": "Alice"},
+                        "status": "member",
+                    },
                 },
             },
         )
@@ -1630,18 +1627,18 @@ class TestOnboarding:
             client,
             {
                 "update_id": 1001,
-                "message": {
-                    "message_id": 1,
-                    "from": {"id": 11111, "first_name": "Admin"},
+                "chat_member": {
                     "chat": {
                         "id": -1001234567890,
                         "type": "supergroup",
                         "title": "Test Group",
                     },
+                    "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
-                    "new_chat_members": [
-                        {"id": 12345},
-                    ],
+                    "new_chat_member": {
+                        "user": {"id": 12345},
+                        "status": "member",
+                    },
                 },
             },
         )

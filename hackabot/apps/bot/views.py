@@ -122,7 +122,6 @@ def _handle_message(message_data):
                 defaults=dict(left=False),
             )
             print(f"✅ {person.first_name} joined {group.display_name}")
-            _onboard_new_member(person, group)
 
     # Handle leave events
     left_member = message_data.get("left_chat_member")
@@ -390,9 +389,11 @@ def _handle_help_command(chat_id, person):
         f"  • Telegram: @{person.username}" if person.username else ""
     )
     if person.username_x:
-        lines.append(f"  • X/Twitter: @{person.username_x}")
+        escaped_x = person.username_x.replace("_", "\\_")
+        lines.append(f"  • X/Twitter: @{escaped_x}")
     if person.bio:
-        lines.append(f"  • Bio: _{person.bio}_")
+        escaped_bio = person.bio.replace("_", "\\_")
+        lines.append(f"  • Bio: _{escaped_bio}_")
 
     lines.append("")
     privacy_status = "ON 🔒" if person.privacy else "OFF 🔓"
@@ -456,7 +457,8 @@ def _handle_x_command(chat_id, person, text):
     person.username_x = username
     person.save()
 
-    message = f"✅ Your X/Twitter username has been set to @{username}"
+    escaped_username = username.replace("_", "\\_")
+    message = f"✅ Your X/Twitter username has been set to @{escaped_username}"
 
     if person.privacy:
         message += (
