@@ -23,7 +23,7 @@ else:
 IS_PRODUCTION = HACKABOT_ENV == "production"
 
 DEBUG = HACKABOT_ENV == "dev"
-ALLOWED_HOSTS = ["*"] if DEBUG else ["hackabot.herokuapp.com"]
+ALLOWED_HOSTS = ["*"] if DEBUG else ["bot.hacka.network"]
 
 INSTALLED_APPS = [
     "daphne",

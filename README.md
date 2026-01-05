@@ -80,16 +80,25 @@ heroku pg:backups:schedule DATABASE_URL --at '02:00 America/Los_Angeles'
 
 # Config
 heroku config:set HACKABOT_ENV=production \
+    DJANGO_SECRET_KEY=your_secret_key \
+    TELEGRAM_BOT_TOKEN=your_bot_token \
+    TELEGRAM_WEBHOOK_URL=https://bot.hacka.network/webhook/telegram/ \
     TELEGRAM_WEBHOOK_SECRET=your_random_secret \
+    SENTRY_DSN=your_sentry_dsn \
     PGBOUNCER_DEFAULT_POOL_SIZE=10 PGBOUNCER_RESERVE_POOL_SIZE=5 \
     PGBOUNCER_MAX_CLIENT_CONN=500 \
     PGBOUNCER_LOG_CONNECTIONS=0 PGBOUNCER_LOG_DISCONNECTIONS=0
+
+# Custom domain
+heroku domains:add bot.hacka.network
+# Then add a CNAME record in your DNS pointing bot.hacka.network
+# to the DNS target shown by: heroku domains
 
 # Initial deploy
 git push heroku master
 
 # Check that it works
-open https://hackabot.herokuapp.com
+open https://bot.hacka.network
 
 # Make sure it doesn't sleep.
 heroku dyno:type worker=basic web=basic
