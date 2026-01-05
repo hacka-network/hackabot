@@ -794,7 +794,12 @@ class TestWebhookEdgeCases:
         message = Message.objects.get(telegram_id=1)
         assert message.text == "Original message"
 
-    def test_callback_query_handled(self, client, db):
+    def test_callback_query_handled(self, client, db, monkeypatch):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.answer_callback_query",
+            lambda qid, text=None: None,
+        )
+
         response = post_webhook(
             client,
             {
@@ -2220,3 +2225,287 @@ class TestPeopleCommand:
         assert response.status_code == 200
         text = sent_messages[0][1]
         assert "/people" in text
+
+
+class TestNodesCommand:
+    def _make_dm(
+        self, text, user_id=12345, first_name="Alice", username="alice"
+    ):
+        return {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "from": {
+                    "id": user_id,
+                    "first_name": first_name,
+                    "username": username,
+                },
+                "chat": {"id": user_id, "type": "private"},
+                "date": 1704067200,
+                "text": text,
+            },
+        }
+
+    def _make_callback_query(
+        self, callback_data, user_id=12345, first_name="Alice"
+    ):
+        return {
+            "update_id": 1002,
+            "callback_query": {
+                "id": "callback123",
+                "from": {"id": user_id, "first_name": first_name},
+                "message": {
+                    "message_id": 1,
+                    "chat": {"id": user_id, "type": "private"},
+                },
+                "data": callback_data,
+            },
+        }
+
+    def test_nodes_command_shows_available_nodes(
+        self, client, db, monkeypatch
+    ):
+        keyboard_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send_with_keyboard",
+            lambda chat_id, text, keyboard: keyboard_messages.append(
+                (chat_id, text, keyboard)
+            ),
+        )
+
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(
+            group=group,
+            name="London",
+            emoji="🇬🇧",
+            location="UK",
+        )
+
+        response = post_webhook(client, self._make_dm("/nodes"))
+
+        assert response.status_code == 200
+        assert len(keyboard_messages) == 1
+        chat_id, text, keyboard = keyboard_messages[0]
+        assert chat_id == 12345
+        assert "Tap a node" in text
+        assert len(keyboard) == 1
+        assert "🇬🇧 London" in keyboard[0][0]["text"]
+        assert "UK" in keyboard[0][0]["text"]
+        assert "node_invite:" in keyboard[0][0]["callback_data"]
+
+    def test_nodes_command_no_nodes_available(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/nodes"))
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "No Hacka" in sent_messages[0][1]
+
+    def test_nodes_command_excludes_nodes_without_group(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        Node.objects.create(
+            group=None,
+            name="London",
+            emoji="🇬🇧",
+        )
+
+        response = post_webhook(client, self._make_dm("/nodes"))
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "No Hacka" in sent_messages[0][1]
+
+    def test_nodes_command_shows_multiple_nodes(self, client, db, monkeypatch):
+        keyboard_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send_with_keyboard",
+            lambda chat_id, text, keyboard: keyboard_messages.append(
+                (chat_id, text, keyboard)
+            ),
+        )
+
+        group1 = Group.objects.create(
+            telegram_id=-100123, display_name="Group 1"
+        )
+        group2 = Group.objects.create(
+            telegram_id=-100124, display_name="Group 2"
+        )
+        Node.objects.create(
+            group=group1,
+            name="London",
+            emoji="🇬🇧",
+        )
+        Node.objects.create(
+            group=group2,
+            name="Paris",
+            emoji="🇫🇷",
+            location="France",
+        )
+
+        response = post_webhook(client, self._make_dm("/nodes"))
+
+        assert response.status_code == 200
+        chat_id, text, keyboard = keyboard_messages[0]
+        assert len(keyboard) == 2
+        button_texts = [keyboard[0][0]["text"], keyboard[1][0]["text"]]
+        assert any("London" in t for t in button_texts)
+        assert any("Paris" in t for t in button_texts)
+        assert any("France" in t for t in button_texts)
+
+    def test_nodes_command_shows_node_without_emoji(
+        self, client, db, monkeypatch
+    ):
+        keyboard_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send_with_keyboard",
+            lambda chat_id, text, keyboard: keyboard_messages.append(
+                (chat_id, text, keyboard)
+            ),
+        )
+
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(
+            group=group,
+            name="Remote",
+            emoji="",
+        )
+
+        response = post_webhook(client, self._make_dm("/nodes"))
+
+        assert response.status_code == 200
+        chat_id, text, keyboard = keyboard_messages[0]
+        assert keyboard[0][0]["text"] == "Remote"
+
+    def test_help_shows_nodes_command(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/help"))
+
+        assert response.status_code == 200
+        text = sent_messages[0][1]
+        assert "/nodes" in text
+
+    def test_callback_query_node_invite_sends_link(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        callback_answers = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.answer_callback_query",
+            lambda qid, text=None: callback_answers.append((qid, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.export_chat_invite_link",
+            lambda chat_id: "https://t.me/+abc123",
+        )
+
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        node = Node.objects.create(
+            group=group,
+            name="London",
+            emoji="🇬🇧",
+        )
+
+        response = post_webhook(
+            client, self._make_callback_query(f"node_invite:{node.slug}")
+        )
+
+        assert response.status_code == 200
+        assert len(callback_answers) == 1
+        assert callback_answers[0][0] == "callback123"
+        assert callback_answers[0][1] is None
+        assert len(sent_messages) == 1
+        assert "https://t.me/+abc123" in sent_messages[0][1]
+        assert "🇬🇧 London" in sent_messages[0][1]
+
+    def test_callback_query_node_not_found(self, client, db, monkeypatch):
+        sent_messages = []
+        callback_answers = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.answer_callback_query",
+            lambda qid, text=None: callback_answers.append((qid, text)),
+        )
+
+        response = post_webhook(
+            client,
+            self._make_callback_query(
+                "node_invite:00000000-0000-0000-0000-000000000000"
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(callback_answers) == 1
+        assert callback_answers[0][1] == "Node not found"
+        assert len(sent_messages) == 0
+
+    def test_callback_query_no_group_linked(self, client, db, monkeypatch):
+        sent_messages = []
+        callback_answers = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.answer_callback_query",
+            lambda qid, text=None: callback_answers.append((qid, text)),
+        )
+
+        node = Node.objects.create(
+            group=None,
+            name="London",
+            emoji="🇬🇧",
+        )
+
+        response = post_webhook(
+            client, self._make_callback_query(f"node_invite:{node.slug}")
+        )
+
+        assert response.status_code == 200
+        assert len(callback_answers) == 1
+        assert callback_answers[0][1] == "No group linked"
+        assert len(sent_messages) == 0
+
+    def test_callback_query_unknown_type(self, client, db, monkeypatch):
+        callback_answers = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.answer_callback_query",
+            lambda qid, text=None: callback_answers.append((qid, text)),
+        )
+
+        response = post_webhook(
+            client, self._make_callback_query("unknown_action:123")
+        )
+
+        assert response.status_code == 200
+        assert len(callback_answers) == 1
+        assert callback_answers[0][1] is None

@@ -28,7 +28,13 @@ from .models import (
     Poll,
     PollAnswer,
 )
-from .telegram import send, verify_webhook_secret
+from .telegram import (
+    answer_callback_query,
+    export_chat_invite_link,
+    send,
+    send_with_keyboard,
+    verify_webhook_secret,
+)
 
 
 def _get_or_create_person(user_data):
@@ -324,6 +330,9 @@ def _handle_dm(message_data):
     elif text.startswith("/people"):
         print("📩 Processing /people command")
         _handle_people_command(chat_id, person)
+    elif text.startswith("/nodes"):
+        print("📩 Processing /nodes command")
+        _handle_nodes_command(chat_id, person)
     else:
         print("📩 Unknown command, sending help prompt")
         send(
@@ -386,6 +395,7 @@ def _handle_help_command(chat_id, person):
     lines.append("  /privacy on — turn privacy mode ON")
     lines.append("  /privacy off — turn privacy mode OFF")
     lines.append("  /people — list people in your nodes")
+    lines.append("  /nodes — browse all nodes and get invite links")
 
     message = "\n".join(line for line in lines if line is not None)
     send(chat_id, message)
@@ -582,6 +592,67 @@ def _handle_bio_command(chat_id, person, text):
     send(chat_id, message)
 
 
+def _handle_nodes_command(chat_id, person):
+    nodes = Node.objects.exclude(group__isnull=True).order_by("name")
+
+    if not nodes.exists():
+        send(chat_id, "📍 No Hacka\\* nodes are currently available to join.")
+        return
+
+    keyboard = []
+    for node in nodes:
+        node_name = f"{node.emoji} {node.name}" if node.emoji else node.name
+        if node.location:
+            node_name = f"{node_name} — {node.location}"
+        keyboard.append(
+            [dict(text=node_name, callback_data=f"node_invite:{node.slug}")]
+        )
+
+    send_with_keyboard(
+        chat_id,
+        "🌍 Tap a node to get its invite link:",
+        keyboard,
+    )
+
+
+def _handle_node_invite_callback(callback_query_id, chat_id, node_slug):
+    try:
+        node = Node.objects.get(slug=node_slug)
+    except Node.DoesNotExist:
+        answer_callback_query(callback_query_id, "Node not found")
+        return
+
+    if not node.group:
+        answer_callback_query(callback_query_id, "No group linked")
+        return
+
+    answer_callback_query(callback_query_id)
+
+    invite_link = export_chat_invite_link(node.group.telegram_id)
+    node_name = f"{node.emoji} {node.name}" if node.emoji else node.name
+    message = f"🔗 *{node_name}* invite link:\n\n{invite_link}"
+    send(chat_id, message)
+
+
+def _handle_callback_query(callback_query_data):
+    print("🔘 Handling callback query...")
+    callback_query_id = callback_query_data.get("id")
+    callback_data = callback_query_data.get("data", "")
+    chat_id = callback_query_data.get("message", {}).get("chat", {}).get("id")
+
+    if not callback_query_id or not chat_id:
+        print("⚠️ Missing callback_query_id or chat_id, skipping")
+        return
+
+    if callback_data.startswith("node_invite:"):
+        node_slug = callback_data.replace("node_invite:", "")
+        print(f"🔘 Processing node invite callback for {node_slug}")
+        _handle_node_invite_callback(callback_query_id, chat_id, node_slug)
+    else:
+        print(f"⚠️ Unknown callback_data: {callback_data}")
+        answer_callback_query(callback_query_id)
+
+
 @csrf_exempt
 @require_POST
 def telegram_webhook(request):
@@ -628,6 +699,11 @@ def telegram_webhook(request):
     if "my_chat_member" in data:
         print("📥 Update type: my_chat_member")
         _handle_my_chat_member(data["my_chat_member"])
+
+    # Handle callback queries (inline keyboard button presses)
+    if "callback_query" in data:
+        print("📥 Update type: callback_query")
+        _handle_callback_query(data["callback_query"])
 
     print("📥✅ Webhook processed successfully")
     return JsonResponse(dict(ok=True))

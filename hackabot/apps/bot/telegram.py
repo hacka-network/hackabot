@@ -12,7 +12,13 @@ TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 TELEGRAM_API_BASE = "https://api.telegram.org"
 HACKA_NETWORK_GLOBAL_CHAT_ID = "-1002257954378"
 
-ALLOWED_UPDATES = ["message", "poll", "poll_answer", "chat_member"]
+ALLOWED_UPDATES = [
+    "message",
+    "poll",
+    "poll_answer",
+    "chat_member",
+    "callback_query",
+]
 
 
 def verify_webhook_secret(request):
@@ -47,9 +53,12 @@ def verify_webhook():
     resp.raise_for_status()
     info = resp.json()
     print(f"📥 getWebhookInfo response: {info}")
-    current_url = info.get("result", {}).get("url", "")
+    result = info.get("result", {})
+    current_url = result.get("url", "")
+    current_updates = set(result.get("allowed_updates", []))
+    expected_updates = set(ALLOWED_UPDATES)
 
-    if current_url == TELEGRAM_WEBHOOK_URL:
+    if current_url == TELEGRAM_WEBHOOK_URL and current_updates == expected_updates:
         print(f"✅ Webhook already set to: {TELEGRAM_WEBHOOK_URL}")
         return True
 
@@ -93,6 +102,50 @@ def send(chat_id, text):
     print(f"📥 sendMessage response: {resp.text}")
     resp.raise_for_status()
     print("✅ Message sent successfully")
+
+
+def send_with_keyboard(chat_id, text, keyboard):
+    print(f"📤 Calling Telegram API: sendMessage with keyboard to chat {chat_id}")
+    print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/sendMessage"
+    resp = requests.post(
+        url,
+        json=dict(
+            chat_id=chat_id,
+            parse_mode="Markdown",
+            text=text,
+            disable_web_page_preview=True,
+            reply_markup=dict(inline_keyboard=keyboard),
+        ),
+    )
+    print(f"📥 sendMessage response: {resp.text}")
+    resp.raise_for_status()
+    print("✅ Message with keyboard sent successfully")
+
+
+def answer_callback_query(callback_query_id, text=None):
+    print(f"📤 Calling Telegram API: answerCallbackQuery {callback_query_id}")
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/answerCallbackQuery"
+    payload = dict(callback_query_id=callback_query_id)
+    if text:
+        payload["text"] = text
+    resp = requests.post(url, json=payload)
+    print(f"📥 answerCallbackQuery response: {resp.text}")
+    resp.raise_for_status()
+    print("✅ Callback query answered")
+
+
+def export_chat_invite_link(chat_id):
+    print(f"📤 Calling Telegram API: exportChatInviteLink for chat {chat_id}")
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/exportChatInviteLink"
+    resp = requests.post(url, json=dict(chat_id=chat_id))
+    print(f"📥 exportChatInviteLink response: {resp.text}")
+    resp.raise_for_status()
+    result = resp.json()
+    return result.get("result")
 
 
 def send_poll(node, when="Thursday"):

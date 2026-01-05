@@ -7,6 +7,7 @@ import responses
 
 from hackabot.apps.bot.models import Event, Poll
 from hackabot.apps.bot.telegram import (
+    ALLOWED_UPDATES,
     TELEGRAM_API_BASE,
     _get_bot_token,
     send,
@@ -66,7 +67,10 @@ class TestVerifyWebhook:
                 f"{TELEGRAM_API_BASE}/bottesttoken/getWebhookInfo",
                 json={
                     "ok": True,
-                    "result": {"url": "https://example.com/webhook/"},
+                    "result": {
+                        "url": "https://example.com/webhook/",
+                        "allowed_updates": ALLOWED_UPDATES,
+                    },
                 },
                 status=200,
             )
