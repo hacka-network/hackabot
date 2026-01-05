@@ -12,19 +12,21 @@ from hackabot.apps.bot.telegram import (
 )
 
 POLL_DAY = 0  # Monday (0 = Monday in arrow weekday)
-POLL_HOUR = 15
+POLL_HOUR = 7
 POLL_MINUTE = 0
+POLL_TIMEZONE = "UTC"  # All polls sent at 7am UTC (= 3pm Bali)
 EVENT_DAY = 3  # Thursday
+REMINDER_MINUTES_BEFORE = 30
 
 
-def should_send_poll(node, now_in_tz):
-    if now_in_tz.weekday() != POLL_DAY:
+def should_send_poll(node, now_utc):
+    if now_utc.weekday() != POLL_DAY:
         return False
 
-    if now_in_tz.hour != POLL_HOUR:
+    if now_utc.hour != POLL_HOUR:
         return False
 
-    if now_in_tz.minute != POLL_MINUTE:
+    if now_utc.minute != POLL_MINUTE:
         return False
 
     if node.last_poll_sent_at:
@@ -39,10 +41,19 @@ def should_send_event_reminder(event, now_in_tz):
     if now_in_tz.weekday() != EVENT_DAY:
         return False
 
-    if now_in_tz.hour != event.time.hour:
+    # Calculate reminder time (30 mins before event)
+    event_datetime = now_in_tz.replace(
+        hour=event.time.hour,
+        minute=event.time.minute,
+        second=0,
+        microsecond=0,
+    )
+    reminder_datetime = event_datetime.shift(minutes=-REMINDER_MINUTES_BEFORE)
+
+    if now_in_tz.hour != reminder_datetime.hour:
         return False
 
-    if now_in_tz.minute != event.time.minute:
+    if now_in_tz.minute != reminder_datetime.minute:
         return False
 
     if event.last_reminder_sent_at:
@@ -54,8 +65,8 @@ def should_send_event_reminder(event, now_in_tz):
 
 
 def process_node_poll(node):
-    now_in_tz = arrow.now(node.timezone or "UTC")
-    if should_send_poll(node, now_in_tz):
+    now_utc = arrow.now(POLL_TIMEZONE)
+    if should_send_poll(node, now_utc):
         print(f"📊 Time to send poll for {node.name}")
         try:
             send_poll(node)

@@ -24,91 +24,100 @@ from hackabot.apps.worker.run import (
 
 class TestShouldSendPoll:
     def test_returns_true_on_monday_at_correct_time(self, node):
-        monday_3pm = arrow.Arrow(2024, 1, 8, 15, 0, 0, tzinfo="America/New_York")
-        assert should_send_poll(node, monday_3pm) is True
+        monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
+        assert should_send_poll(node, monday_7am_utc) is True
 
     def test_returns_false_on_wrong_day(self, node):
-        tuesday_3pm = arrow.Arrow(2024, 1, 9, 15, 0, 0, tzinfo="America/New_York")
-        assert should_send_poll(node, tuesday_3pm) is False
+        tuesday_7am_utc = arrow.Arrow(2024, 1, 9, 7, 0, 0, tzinfo="UTC")
+        assert should_send_poll(node, tuesday_7am_utc) is False
 
     def test_returns_false_on_wrong_hour(self, node):
-        monday_4pm = arrow.Arrow(2024, 1, 8, 16, 0, 0, tzinfo="America/New_York")
-        assert should_send_poll(node, monday_4pm) is False
+        monday_8am_utc = arrow.Arrow(2024, 1, 8, 8, 0, 0, tzinfo="UTC")
+        assert should_send_poll(node, monday_8am_utc) is False
 
     def test_returns_false_on_wrong_minute(self, node):
-        monday_3_30pm = arrow.Arrow(2024, 1, 8, 15, 30, 0, tzinfo="America/New_York")
-        assert should_send_poll(node, monday_3_30pm) is False
+        monday_7_30am_utc = arrow.Arrow(2024, 1, 8, 7, 30, 0, tzinfo="UTC")
+        assert should_send_poll(node, monday_7_30am_utc) is False
 
     def test_returns_false_if_poll_sent_recently(self, node):
         node.last_poll_sent_at = timezone.now() - timedelta(days=3)
-        monday_3pm = arrow.Arrow(2024, 1, 8, 15, 0, 0, tzinfo="America/New_York")
-        assert should_send_poll(node, monday_3pm) is False
+        monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
+        assert should_send_poll(node, monday_7am_utc) is False
 
     def test_returns_true_if_poll_sent_over_6_days_ago(self, node):
         node.last_poll_sent_at = timezone.now() - timedelta(days=7)
-        monday_3pm = arrow.Arrow(2024, 1, 8, 15, 0, 0, tzinfo="America/New_York")
-        assert should_send_poll(node, monday_3pm) is True
+        monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
+        assert should_send_poll(node, monday_7am_utc) is True
 
     def test_returns_true_if_never_sent_poll(self, node):
         node.last_poll_sent_at = None
-        monday_3pm = arrow.Arrow(2024, 1, 8, 15, 0, 0, tzinfo="America/New_York")
-        assert should_send_poll(node, monday_3pm) is True
+        monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
+        assert should_send_poll(node, monday_7am_utc) is True
 
 
 class TestShouldSendEventReminder:
-    def test_returns_true_on_thursday_at_event_time(self, node):
+    def test_returns_true_30_mins_before_event_time(self, node):
+        # Event at 9:30am, reminder should be sent at 9:00am (30 mins before)
         event = Event(
             node=node, type="intros", time=time(9, 30), where="Main Hall"
         )
-        thursday_930am = arrow.Arrow(
-            2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
-        )
-        assert should_send_event_reminder(event, thursday_930am) is True
-
-    def test_returns_false_on_wrong_day(self, node):
-        event = Event(node=node, type="intros", time=time(9, 30), where="")
-        wednesday_930am = arrow.Arrow(
-            2024, 1, 10, 9, 30, 0, tzinfo="America/New_York"
-        )
-        assert should_send_event_reminder(event, wednesday_930am) is False
-
-    def test_returns_false_on_wrong_hour(self, node):
-        event = Event(node=node, type="intros", time=time(9, 30), where="")
-        thursday_1030am = arrow.Arrow(
-            2024, 1, 11, 10, 30, 0, tzinfo="America/New_York"
-        )
-        assert should_send_event_reminder(event, thursday_1030am) is False
-
-    def test_returns_false_on_wrong_minute(self, node):
-        event = Event(node=node, type="intros", time=time(9, 30), where="")
-        thursday_900am = arrow.Arrow(
+        thursday_9am = arrow.Arrow(
             2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
         )
-        assert should_send_event_reminder(event, thursday_900am) is False
+        assert should_send_event_reminder(event, thursday_9am) is True
 
-    def test_returns_false_if_reminder_sent_recently(self, node):
+    def test_returns_false_at_event_time(self, node):
+        # At the actual event time, reminder should NOT be sent (already sent)
         event = Event(node=node, type="intros", time=time(9, 30), where="")
-        event.last_reminder_sent_at = timezone.now() - timedelta(days=3)
         thursday_930am = arrow.Arrow(
             2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
         )
         assert should_send_event_reminder(event, thursday_930am) is False
 
+    def test_returns_false_on_wrong_day(self, node):
+        event = Event(node=node, type="intros", time=time(9, 30), where="")
+        wednesday_9am = arrow.Arrow(
+            2024, 1, 10, 9, 0, 0, tzinfo="America/New_York"
+        )
+        assert should_send_event_reminder(event, wednesday_9am) is False
+
+    def test_returns_false_on_wrong_hour(self, node):
+        event = Event(node=node, type="intros", time=time(9, 30), where="")
+        thursday_10am = arrow.Arrow(
+            2024, 1, 11, 10, 0, 0, tzinfo="America/New_York"
+        )
+        assert should_send_event_reminder(event, thursday_10am) is False
+
+    def test_returns_false_on_wrong_minute(self, node):
+        event = Event(node=node, type="intros", time=time(9, 30), where="")
+        thursday_915am = arrow.Arrow(
+            2024, 1, 11, 9, 15, 0, tzinfo="America/New_York"
+        )
+        assert should_send_event_reminder(event, thursday_915am) is False
+
+    def test_returns_false_if_reminder_sent_recently(self, node):
+        event = Event(node=node, type="intros", time=time(9, 30), where="")
+        event.last_reminder_sent_at = timezone.now() - timedelta(days=3)
+        thursday_9am = arrow.Arrow(
+            2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
+        )
+        assert should_send_event_reminder(event, thursday_9am) is False
+
     def test_returns_true_if_reminder_sent_over_6_days_ago(self, node):
         event = Event(node=node, type="intros", time=time(9, 30), where="")
         event.last_reminder_sent_at = timezone.now() - timedelta(days=7)
-        thursday_930am = arrow.Arrow(
-            2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
+        thursday_9am = arrow.Arrow(
+            2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
         )
-        assert should_send_event_reminder(event, thursday_930am) is True
+        assert should_send_event_reminder(event, thursday_9am) is True
 
     def test_returns_true_if_never_sent_reminder(self, node):
         event = Event(node=node, type="intros", time=time(9, 30), where="")
         event.last_reminder_sent_at = None
-        thursday_930am = arrow.Arrow(
-            2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
+        thursday_9am = arrow.Arrow(
+            2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
         )
-        assert should_send_event_reminder(event, thursday_930am) is True
+        assert should_send_event_reminder(event, thursday_9am) is True
 
 
 class TestProcessNodePoll:
@@ -144,11 +153,11 @@ class TestProcessNodePoll:
                 status=200,
             )
 
-            monday_3pm = arrow.Arrow(
-                2024, 1, 8, 15, 0, 0, tzinfo="America/New_York"
+            monday_7am_utc = arrow.Arrow(
+                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = monday_3pm
+                mock_arrow.now.return_value = monday_7am_utc
                 process_node_poll(node)
 
             node.refresh_from_db()
@@ -157,9 +166,9 @@ class TestProcessNodePoll:
 
     @responses.activate
     def test_does_not_send_poll_on_wrong_day(self, node):
-        tuesday_3pm = arrow.Arrow(2024, 1, 9, 15, 0, 0, tzinfo="America/New_York")
+        tuesday_7am_utc = arrow.Arrow(2024, 1, 9, 7, 0, 0, tzinfo="UTC")
         with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-            mock_arrow.now.return_value = tuesday_3pm
+            mock_arrow.now.return_value = tuesday_7am_utc
             process_node_poll(node)
 
         node.refresh_from_db()
@@ -182,12 +191,13 @@ class TestProcessNodeEvents:
                 status=200,
             )
 
+            # intros_event is at 9:30am, reminder sent 30 mins before at 9:00am
             intros_event = events[0]
-            thursday_930am = arrow.Arrow(
-                2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
+            thursday_9am = arrow.Arrow(
+                2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_930am
+                mock_arrow.now.return_value = thursday_9am
                 process_node_events(node)
 
             intros_event.refresh_from_db()
@@ -196,7 +206,7 @@ class TestProcessNodeEvents:
 
     @responses.activate
     def test_does_not_send_reminder_on_wrong_day(self, node, events):
-        wednesday = arrow.Arrow(2024, 1, 10, 9, 30, 0, tzinfo="America/New_York")
+        wednesday = arrow.Arrow(2024, 1, 10, 9, 0, 0, tzinfo="America/New_York")
         with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
             mock_arrow.now.return_value = wednesday
             process_node_events(node)
@@ -215,6 +225,7 @@ class TestEventReminderMessages:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
+            # Event at 9:30am, reminder sent 30 mins before at 9:00am
             event = Event.objects.create(
                 node=node, type="intros", time=time(9, 30), where="Main Hall"
             )
@@ -226,11 +237,11 @@ class TestEventReminderMessages:
                 status=200,
             )
 
-            thursday_930am = arrow.Arrow(
-                2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
+            thursday_9am = arrow.Arrow(
+                2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_930am
+                mock_arrow.now.return_value = thursday_9am
                 process_node_events(node)
 
             event.refresh_from_db()
@@ -246,6 +257,7 @@ class TestEventReminderMessages:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
+            # Event at 4pm (16:00), reminder sent 30 mins before at 3:30pm
             event = Event.objects.create(
                 node=node, type="demos", time=time(16, 0), where="Demo Stage"
             )
@@ -257,11 +269,11 @@ class TestEventReminderMessages:
                 status=200,
             )
 
-            thursday_4pm = arrow.Arrow(
-                2024, 1, 11, 16, 0, 0, tzinfo="America/New_York"
+            thursday_330pm = arrow.Arrow(
+                2024, 1, 11, 15, 30, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_4pm
+                mock_arrow.now.return_value = thursday_330pm
                 process_node_events(node)
 
             event.refresh_from_db()
@@ -277,8 +289,42 @@ class TestEventReminderMessages:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
+            # Event at 12pm, reminder sent 30 mins before at 11:30am
             event = Event.objects.create(
                 node=node, type="lunch", time=time(12, 0), where="Cafeteria"
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            thursday_1130am = arrow.Arrow(
+                2024, 1, 11, 11, 30, 0, tzinfo="America/New_York"
+            )
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = thursday_1130am
+                process_node_events(node)
+
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Lunch at 12pm" in request_body
+            assert "Cafeteria" in request_body
+
+    @responses.activate
+    def test_lunch_reminder_without_location(self, node, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            # Event at 12:30pm, reminder sent 30 mins before at 12:00pm
+            event = Event.objects.create(
+                node=node, type="lunch", time=time(12, 30), where=""
             )
 
             responses.add(
@@ -299,38 +345,6 @@ class TestEventReminderMessages:
             assert event.last_reminder_sent_at is not None
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
-            assert "Lunch at 12pm" in request_body
-            assert "Cafeteria" in request_body
-
-    @responses.activate
-    def test_lunch_reminder_without_location(self, node, group):
-        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
-            from hackabot.apps.bot import telegram
-
-            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
-
-            event = Event.objects.create(
-                node=node, type="lunch", time=time(12, 30), where=""
-            )
-
-            responses.add(
-                responses.POST,
-                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
-                json={"ok": True, "result": {"message_id": 1001}},
-                status=200,
-            )
-
-            thursday_1230 = arrow.Arrow(
-                2024, 1, 11, 12, 30, 0, tzinfo="America/New_York"
-            )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_1230
-                process_node_events(node)
-
-            event.refresh_from_db()
-            assert event.last_reminder_sent_at is not None
-            assert len(responses.calls) == 1
-            request_body = responses.calls[0].request.body.decode()
             assert "Lunch at 12:30pm" in request_body
             assert "in" not in request_body
 
@@ -341,6 +355,7 @@ class TestEventReminderMessages:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
+            # Event at 6pm (18:00), reminder sent 30 mins before at 5:30pm
             event = Event.objects.create(
                 node=node, type="drinks", time=time(18, 0), where="Rooftop Bar"
             )
@@ -352,11 +367,11 @@ class TestEventReminderMessages:
                 status=200,
             )
 
-            thursday_6pm = arrow.Arrow(
-                2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
+            thursday_530pm = arrow.Arrow(
+                2024, 1, 11, 17, 30, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_6pm
+                mock_arrow.now.return_value = thursday_530pm
                 process_node_events(node)
 
             event.refresh_from_db()
@@ -372,6 +387,7 @@ class TestEventReminderMessages:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
+            # Event at 6:30pm (18:30), reminder sent 30 mins before at 6pm
             event = Event.objects.create(
                 node=node, type="drinks", time=time(18, 30), where=""
             )
@@ -383,11 +399,11 @@ class TestEventReminderMessages:
                 status=200,
             )
 
-            thursday_630pm = arrow.Arrow(
-                2024, 1, 11, 18, 30, 0, tzinfo="America/New_York"
+            thursday_6pm = arrow.Arrow(
+                2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_630pm
+                mock_arrow.now.return_value = thursday_6pm
                 process_node_events(node)
 
             event.refresh_from_db()
@@ -446,11 +462,11 @@ class TestCheckAllNodes:
                 status=200,
             )
 
-            monday_3pm = arrow.Arrow(
-                2024, 1, 8, 15, 0, 0, tzinfo="America/New_York"
+            monday_7am_utc = arrow.Arrow(
+                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = monday_3pm
+                mock_arrow.now.return_value = monday_7am_utc
                 check_all_nodes()
 
             node1.refresh_from_db()
@@ -474,11 +490,11 @@ class TestErrorHandling:
                 status=400,
             )
 
-            monday_3pm = arrow.Arrow(
-                2024, 1, 8, 15, 0, 0, tzinfo="America/New_York"
+            monday_7am_utc = arrow.Arrow(
+                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = monday_3pm
+                mock_arrow.now.return_value = monday_7am_utc
                 with patch("hackabot.apps.worker.run.sentry_sdk") as mock_sentry:
                     process_node_poll(node)
                     assert mock_sentry.capture_exception.called
@@ -500,12 +516,13 @@ class TestErrorHandling:
                 status=400,
             )
 
+            # intros_event is at 9:30am, reminder sent 30 mins before at 9:00am
             intros_event = events[0]
-            thursday_930am = arrow.Arrow(
-                2024, 1, 11, 9, 30, 0, tzinfo="America/New_York"
+            thursday_9am = arrow.Arrow(
+                2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_930am
+                mock_arrow.now.return_value = thursday_9am
                 with patch("hackabot.apps.worker.run.sentry_sdk") as mock_sentry:
                     process_node_events(node)
                     assert mock_sentry.capture_exception.called
@@ -547,11 +564,11 @@ class TestDynamicNodeHandling:
                 status=200,
             )
 
-            monday_3pm = arrow.Arrow(
-                2024, 1, 8, 15, 0, 0, tzinfo="America/New_York"
+            monday_7am_utc = arrow.Arrow(
+                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = monday_3pm
+                mock_arrow.now.return_value = monday_7am_utc
                 check_all_nodes()
 
             assert len(responses.calls) == 0
@@ -563,7 +580,7 @@ class TestDynamicNodeHandling:
             )
 
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = monday_3pm
+                mock_arrow.now.return_value = monday_7am_utc
                 check_all_nodes()
 
             new_node.refresh_from_db()
