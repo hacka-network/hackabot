@@ -136,5 +136,5 @@ if SENTRY_DSN:
         environment="production" if IS_PRODUCTION else "dev",
         dsn=SENTRY_DSN,
         integrations=[DjangoIntegration()],
-        send_default_pii=True,
+        send_default_pii=False,
     )

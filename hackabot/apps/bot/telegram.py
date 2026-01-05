@@ -1,6 +1,9 @@
+import hmac
 import os
 
 import requests
+
+REQUEST_TIMEOUT = 30
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_WEBHOOK_URL = os.environ.get("TELEGRAM_WEBHOOK_URL", "")
@@ -19,7 +22,7 @@ ALLOWED_UPDATES = [
 
 def verify_webhook_secret(request):
     header_value = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    is_valid = header_value == TELEGRAM_WEBHOOK_SECRET
+    is_valid = hmac.compare_digest(header_value, TELEGRAM_WEBHOOK_SECRET)
     if is_valid:
         print("🔐 Webhook secret: valid")
     else:
@@ -45,7 +48,10 @@ def verify_webhook():
 
     # Get current webhook info
     print("📤 Calling Telegram API: getWebhookInfo")
-    resp = requests.get(f"{TELEGRAM_API_BASE}/{token}/getWebhookInfo")
+    resp = requests.get(
+        f"{TELEGRAM_API_BASE}/{token}/getWebhookInfo",
+        timeout=REQUEST_TIMEOUT,
+    )
     resp.raise_for_status()
     info = resp.json()
     print(f"📥 getWebhookInfo response: {info}")
@@ -72,6 +78,7 @@ def verify_webhook():
     resp = requests.post(
         f"{TELEGRAM_API_BASE}/{token}/setWebhook",
         json=payload,
+        timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
     result = resp.json()
@@ -97,6 +104,7 @@ def send(chat_id, text):
             text=text,
             disable_web_page_preview=True,
         ),
+        timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 sendMessage response: {resp.text}")
     resp.raise_for_status()
@@ -119,6 +127,7 @@ def send_with_keyboard(chat_id, text, keyboard):
             disable_web_page_preview=True,
             reply_markup=dict(inline_keyboard=keyboard),
         ),
+        timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 sendMessage response: {resp.text}")
     resp.raise_for_status()
@@ -132,7 +141,7 @@ def answer_callback_query(callback_query_id, text=None):
     payload = dict(callback_query_id=callback_query_id)
     if text:
         payload["text"] = text
-    resp = requests.post(url, json=payload)
+    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
     print(f"📥 answerCallbackQuery response: {resp.text}")
     resp.raise_for_status()
     print("✅ Callback query answered")
@@ -142,7 +151,11 @@ def export_chat_invite_link(chat_id):
     print(f"📤 Calling Telegram API: exportChatInviteLink for chat {chat_id}")
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/exportChatInviteLink"
-    resp = requests.post(url, json=dict(chat_id=chat_id))
+    resp = requests.post(
+        url,
+        json=dict(chat_id=chat_id),
+        timeout=REQUEST_TIMEOUT,
+    )
     print(f"📥 exportChatInviteLink response: {resp.text}")
     resp.raise_for_status()
     result = resp.json()
@@ -167,6 +180,7 @@ def send_poll(node, when="Thursday"):
             is_anonymous=False,
             allows_multiple_answers=False,
         ),
+        timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 sendPoll response: {resp.text}")
     resp.raise_for_status()
@@ -211,6 +225,7 @@ def send_poll(node, when="Thursday"):
                 message_id=message_id,
                 disable_notification=False,
             ),
+            timeout=REQUEST_TIMEOUT,
         )
         print(f"📥 pinChatMessage response: {resp.json()}")
         print("📌 Poll pinned successfully")
