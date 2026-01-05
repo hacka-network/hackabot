@@ -150,6 +150,7 @@ class TestWebhookBasicMessage:
         self, client, db, monkeypatch
     ):
         monkeypatch.setattr("hackabot.apps.bot.views.send", lambda *args: None)
+        Group.objects.all().delete()
 
         response = post_webhook(
             client,
@@ -1733,7 +1734,9 @@ class TestBioCommand:
         )
         self._setup_member()
 
-        response = post_webhook(client, self._make_dm("/bio I build cool stuff"))
+        response = post_webhook(
+            client, self._make_dm("/bio I build cool stuff")
+        )
 
         assert response.status_code == 200
         person = Person.objects.get(telegram_id=12345)
@@ -1755,7 +1758,9 @@ class TestBioCommand:
         assert person.bio == ""
         assert "cleared" in sent_messages[0][1]
 
-    def test_bio_command_shows_current_when_no_args(self, client, db, monkeypatch):
+    def test_bio_command_shows_current_when_no_args(
+        self, client, db, monkeypatch
+    ):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
@@ -1828,9 +1833,7 @@ class TestBioCommand:
         )
         self._setup_member()
 
-        response = post_webhook(
-            client, self._make_dm("/bio I am <b>bold</b>")
-        )
+        response = post_webhook(client, self._make_dm("/bio I am <b>bold</b>"))
 
         assert response.status_code == 200
         person = Person.objects.get(telegram_id=12345)
@@ -1850,7 +1853,9 @@ class TestBioCommand:
         assert response.status_code == 200
         assert "cannot contain HTML" in sent_messages[0][1]
 
-    def test_bio_command_unescapes_html_entities(self, client, db, monkeypatch):
+    def test_bio_command_unescapes_html_entities(
+        self, client, db, monkeypatch
+    ):
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send", lambda chat_id, text: None
         )
@@ -2019,9 +2024,7 @@ class TestPeopleCommand:
         assert len(sent_messages) == 1
         assert "member of at least one Hacka* node" in sent_messages[0][1]
 
-    def test_people_command_shows_public_people(
-        self, client, db, monkeypatch
-    ):
+    def test_people_command_shows_public_people(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
@@ -2262,6 +2265,8 @@ class TestNodesCommand:
     def _setup_member(self, telegram_id=12345, first_name="Alice", **kwargs):
         from hackabot.apps.bot.models import Group, GroupPerson, Node, Person
 
+        Node.objects.all().delete()
+        Group.objects.all().delete()
         person = Person.objects.create(
             telegram_id=telegram_id, first_name=first_name, **kwargs
         )
@@ -2304,9 +2309,13 @@ class TestNodesCommand:
         assert len(keyboard) == 2
         button_texts = [row[0]["text"] for row in keyboard]
         assert any("🇬🇧 London" in t and "UK" in t for t in button_texts)
-        assert any("node_invite:" in row[0]["callback_data"] for row in keyboard)
+        assert any(
+            "node_invite:" in row[0]["callback_data"] for row in keyboard
+        )
 
-    def test_nodes_command_shows_users_home_node(self, client, db, monkeypatch):
+    def test_nodes_command_shows_users_home_node(
+        self, client, db, monkeypatch
+    ):
         keyboard_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send_with_keyboard",

@@ -20,6 +20,8 @@ def client():
 
 class TestApiNodes:
     def test_empty_nodes_list(self, client, db):
+        Node.objects.all().delete()
+
         response = client.get("/api/nodes/")
 
         assert response.status_code == 200
@@ -44,6 +46,7 @@ class TestApiNodes:
         assert response.status_code == 405
 
     def test_single_node(self, client, db):
+        Node.objects.all().delete()
         node = Node.objects.create(
             name="Test Node",
             emoji="🚀",
@@ -70,6 +73,7 @@ class TestApiNodes:
         assert data["people"] == []
 
     def test_nodes_ordered_by_established(self, client, db):
+        Node.objects.all().delete()
         Node.objects.create(name="Third", established=2022)
         Node.objects.create(name="First", established=2018)
         Node.objects.create(name="Second", established=2020)
@@ -81,6 +85,7 @@ class TestApiNodes:
         assert names == ["First", "Second", "Third"]
 
     def test_nodes_null_established_comes_last(self, client, db):
+        Node.objects.all().delete()
         Node.objects.create(name="No Year")
         Node.objects.create(name="Has Year", established=2020)
 
@@ -288,11 +293,14 @@ class TestApiNodes:
         assert data["nodes"][0]["activity_level"] == 0
 
     def test_activity_level_based_on_poll_yes_count(self, client, db):
+        Node.objects.all().delete()
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
+        node = Node.objects.create(
+            name="Test Node", group=group, timezone="UTC"
+        )
 
         two_weeks_ago = timezone.now() - timedelta(weeks=2)
         poll = Poll.objects.create(
@@ -309,11 +317,14 @@ class TestApiNodes:
         assert data["nodes"][0]["activity_level"] == 5
 
     def test_activity_level_max_at_8_attendees(self, client, db):
+        Node.objects.all().delete()
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
+        node = Node.objects.create(
+            name="Test Node", group=group, timezone="UTC"
+        )
 
         two_weeks_ago = timezone.now() - timedelta(weeks=2)
         poll = Poll.objects.create(
@@ -330,11 +341,14 @@ class TestApiNodes:
         assert data["nodes"][0]["activity_level"] == 10
 
     def test_activity_level_averages_multiple_polls(self, client, db):
+        Node.objects.all().delete()
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
+        node = Node.objects.create(
+            name="Test Node", group=group, timezone="UTC"
+        )
 
         two_weeks_ago = timezone.now() - timedelta(weeks=2)
         three_weeks_ago = timezone.now() - timedelta(weeks=3)
@@ -365,7 +379,9 @@ class TestApiNodes:
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        node = Node.objects.create(name="Test Node", group=group, timezone="UTC")
+        node = Node.objects.create(
+            name="Test Node", group=group, timezone="UTC"
+        )
 
         six_weeks_ago = timezone.now() - timedelta(weeks=6)
         poll = Poll.objects.create(
@@ -472,7 +488,9 @@ class TestApiNodes:
         person_data = data["people"][0]
         assert person_data["nodes"][0]["attending"] is False
 
-    def test_people_sorted_attending_first_then_alphabetically(self, client, db):
+    def test_people_sorted_attending_first_then_alphabetically(
+        self, client, db
+    ):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
@@ -607,7 +625,7 @@ class TestApiNodes:
         person = Person.objects.create(
             telegram_id=1,
             first_name="Alice",
-            bio='<a href="javascript:alert(\'xss\')">Click me</a>',
+            bio="<a href=\"javascript:alert('xss')\">Click me</a>",
             privacy=False,
         )
         GroupPerson.objects.create(group=group, person=person, left=False)

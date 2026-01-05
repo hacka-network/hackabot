@@ -7,7 +7,14 @@ import pytest
 import responses
 from django.utils import timezone
 
-from hackabot.apps.bot.models import Event, Group, Node, Person, Poll, PollAnswer
+from hackabot.apps.bot.models import (
+    Event,
+    Group,
+    Node,
+    Person,
+    Poll,
+    PollAnswer,
+)
 from hackabot.apps.bot.telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
     TELEGRAM_API_BASE,
@@ -161,9 +168,7 @@ class TestProcessNodePoll:
                 status=200,
             )
 
-            monday_7am_utc = arrow.Arrow(
-                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
-            )
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
                 mock_arrow.now.return_value = monday_7am_utc
                 process_node_poll(node)
@@ -214,7 +219,9 @@ class TestProcessNodeEvents:
 
     @responses.activate
     def test_does_not_send_reminder_on_wrong_day(self, node, events):
-        wednesday = arrow.Arrow(2024, 1, 10, 9, 0, 0, tzinfo="America/New_York")
+        wednesday = arrow.Arrow(
+            2024, 1, 10, 9, 0, 0, tzinfo="America/New_York"
+        )
         with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
             mock_arrow.now.return_value = wednesday
             process_node_events(node)
@@ -470,9 +477,7 @@ class TestCheckAllNodes:
                 status=200,
             )
 
-            monday_7am_utc = arrow.Arrow(
-                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
-            )
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
                 mock_arrow.now.return_value = monday_7am_utc
                 check_all_nodes()
@@ -498,12 +503,12 @@ class TestErrorHandling:
                 status=400,
             )
 
-            monday_7am_utc = arrow.Arrow(
-                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
-            )
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
                 mock_arrow.now.return_value = monday_7am_utc
-                with patch("hackabot.apps.worker.run.sentry_sdk") as mock_sentry:
+                with patch(
+                    "hackabot.apps.worker.run.sentry_sdk"
+                ) as mock_sentry:
                     process_node_poll(node)
                     assert mock_sentry.capture_exception.called
 
@@ -511,7 +516,9 @@ class TestErrorHandling:
             assert node.last_poll_sent_at is None
 
     @responses.activate
-    def test_event_reminder_error_does_not_update_timestamp(self, node, events):
+    def test_event_reminder_error_does_not_update_timestamp(
+        self, node, events
+    ):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -531,7 +538,9 @@ class TestErrorHandling:
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
                 mock_arrow.now.return_value = thursday_9am
-                with patch("hackabot.apps.worker.run.sentry_sdk") as mock_sentry:
+                with patch(
+                    "hackabot.apps.worker.run.sentry_sdk"
+                ) as mock_sentry:
                     process_node_events(node)
                     assert mock_sentry.capture_exception.called
 
@@ -542,6 +551,7 @@ class TestErrorHandling:
 class TestDynamicNodeHandling:
     @responses.activate
     def test_new_nodes_are_picked_up(self, db, group):
+        Node.objects.all().delete()
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -572,9 +582,7 @@ class TestDynamicNodeHandling:
                 status=200,
             )
 
-            monday_7am_utc = arrow.Arrow(
-                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
-            )
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
                 mock_arrow.now.return_value = monday_7am_utc
                 check_all_nodes()
@@ -610,23 +618,36 @@ class TestShouldSendWeeklySummary:
 
     def test_returns_false_on_wrong_day(self, global_group):
         thursday_7am_utc = arrow.Arrow(2024, 1, 11, 7, 0, 0, tzinfo="UTC")
-        assert should_send_weekly_summary(global_group, thursday_7am_utc) is False
+        assert (
+            should_send_weekly_summary(global_group, thursday_7am_utc) is False
+        )
 
     def test_returns_false_on_wrong_hour(self, global_group):
         friday_8am_utc = arrow.Arrow(2024, 1, 12, 8, 0, 0, tzinfo="UTC")
-        assert should_send_weekly_summary(global_group, friday_8am_utc) is False
+        assert (
+            should_send_weekly_summary(global_group, friday_8am_utc) is False
+        )
 
     def test_returns_false_on_wrong_minute(self, global_group):
         friday_7_30am_utc = arrow.Arrow(2024, 1, 12, 7, 30, 0, tzinfo="UTC")
-        assert should_send_weekly_summary(global_group, friday_7_30am_utc) is False
+        assert (
+            should_send_weekly_summary(global_group, friday_7_30am_utc)
+            is False
+        )
 
     def test_returns_false_if_summary_sent_recently(self, global_group):
-        global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(days=3)
+        global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(
+            days=3
+        )
         friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-        assert should_send_weekly_summary(global_group, friday_7am_utc) is False
+        assert (
+            should_send_weekly_summary(global_group, friday_7am_utc) is False
+        )
 
     def test_returns_true_if_summary_sent_over_6_days_ago(self, global_group):
-        global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(days=7)
+        global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(
+            days=7
+        )
         friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
         assert should_send_weekly_summary(global_group, friday_7am_utc) is True
 
@@ -740,8 +761,12 @@ class TestWeeklySummaryMessage:
                 node=node,
                 question="Who's coming?",
             )
-            person1 = Person.objects.create(telegram_id=11111, first_name="Alice")
-            person2 = Person.objects.create(telegram_id=22222, first_name="Bob")
+            person1 = Person.objects.create(
+                telegram_id=11111, first_name="Alice"
+            )
+            person2 = Person.objects.create(
+                telegram_id=22222, first_name="Bob"
+            )
             PollAnswer.objects.create(poll=poll, person=person1, yes=True)
             PollAnswer.objects.create(poll=poll, person=person2, yes=True)
 
@@ -779,7 +804,9 @@ class TestWeeklySummaryMessage:
             assert len(responses.calls) == 0
 
     @responses.activate
-    def test_summary_only_includes_nodes_with_attendance(self, db, global_group):
+    def test_summary_only_includes_nodes_with_attendance(
+        self, db, global_group
+    ):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -800,7 +827,9 @@ class TestWeeklySummaryMessage:
                 node=node1,
                 question="Who's coming?",
             )
-            person = Person.objects.create(telegram_id=33333, first_name="Charlie")
+            person = Person.objects.create(
+                telegram_id=33333, first_name="Charlie"
+            )
             PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
             responses.add(
