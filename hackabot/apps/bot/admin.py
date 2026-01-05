@@ -23,10 +23,16 @@ class GroupAdmin(admin.ModelAdmin):
         "id",
         "telegram_id",
         "display_name",
+        "has_node",
         "messages_7d",
         "messages_30d",
         "created",
     ]
+
+    @admin.display(boolean=True, description="Node")
+    def has_node(self, obj):
+        return obj.node_set.exists()
+
     search_fields = ["telegram_id", "display_name"]
     ordering = ["-created"]
 
@@ -121,6 +127,7 @@ class NodeAdmin(admin.ModelAdmin):
         "slug",
         "location",
         "timezone",
+        "has_group",
         "messages_7d",
         "messages_30d",
         "established",
@@ -128,6 +135,11 @@ class NodeAdmin(admin.ModelAdmin):
         "group",
         "created",
     ]
+
+    @admin.display(boolean=True, description="Group")
+    def has_group(self, obj):
+        return obj.group is not None
+
     search_fields = ["name", "location", "slug"]
     ordering = ["name"]
     raw_id_fields = ["group"]
