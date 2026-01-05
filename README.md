@@ -72,6 +72,7 @@ services are required to run tests.
 
 ```sh
 heroku create --buildpack heroku/python --region us hackabot
+heroku certs:auto:enable
 heroku buildpacks:add heroku/pgbouncer
 heroku addons:create heroku-postgresql:essential-0
 
@@ -97,10 +98,19 @@ heroku domains:add bot.hacka.network
 # Initial deploy
 git push heroku main
 
-# Check that it works
-open https://bot.hacka.network
+# Create a superuser
+heroku run python manage.py createsuperuser
 
 # Make sure it doesn't sleep.
 heroku dyno:type worker=basic web=basic
 heroku ps:scale worker=1 web=1
+
+# Check that it works
+open https://bot.hacka.network
+```
+
+To see the logs:
+
+```sh
+heroku logs --tail
 ```
