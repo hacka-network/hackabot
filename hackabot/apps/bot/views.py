@@ -385,9 +385,9 @@ def _handle_help_command(chat_id, person):
 
     lines.append("")
     lines.append(f"👤 *Your profile:*")
-    lines.append(
-        f"  • Telegram: @{person.username}" if person.username else ""
-    )
+    if person.username:
+        escaped_username = person.username.replace("_", "\\_")
+        lines.append(f"  • Telegram: @{escaped_username}")
     if person.username_x:
         escaped_x = person.username_x.replace("_", "\\_")
         lines.append(f"  • X/Twitter: @{escaped_x}")
