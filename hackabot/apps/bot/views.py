@@ -11,6 +11,13 @@ from django.views.decorators.http import require_POST
 
 BIO_MAX_LENGTH = 500
 
+
+def _sanitize_for_html(text):
+    if not text:
+        return text
+    return html.escape(text, quote=True)
+
+
 from .models import (
     ActivityDay,
     Group,
@@ -406,6 +413,21 @@ def _handle_x_command(chat_id, person, text):
         )
         return
 
+    if "<" in username or ">" in username:
+        send(
+            chat_id,
+            "❌ Username cannot contain HTML characters.",
+        )
+        return
+
+    if not re.match(r"^[a-zA-Z0-9_]+$", username):
+        send(
+            chat_id,
+            "❌ Please provide a valid username.\n\n"
+            "Example: `/x @yourname`",
+        )
+        return
+
     person.username_x = username
     person.save()
 
@@ -744,12 +766,16 @@ def api_nodes(request):
             continue
 
         person_data = dict(
-            display_name=person.first_name,
-            username_x=person.username_x if person.username_x else None,
+            display_name=_sanitize_for_html(person.first_name),
+            username_x=(
+                _sanitize_for_html(person.username_x)
+                if person.username_x
+                else None
+            ),
             nodes=person_nodes,
         )
         if person.bio:
-            person_data["bio"] = person.bio
+            person_data["bio"] = _sanitize_for_html(person.bio)
 
         people_data.append(
             (is_attending_any, person.first_name.lower(), person_data)

@@ -1078,6 +1078,58 @@ class TestWebhookDMs:
         text = sent_messages[0][1]
         assert "privacy mode" not in text.lower()
 
+    def test_dm_x_command_rejects_html(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(
+            client, self._make_dm("/x <script>alert('xss')</script>")
+        )
+
+        assert response.status_code == 200
+        from hackabot.apps.bot.models import Person
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.username_x == ""
+        assert "cannot contain HTML" in sent_messages[0][1]
+
+    def test_dm_x_command_rejects_greater_than(self, client, db, monkeypatch):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/x foo>bar"))
+
+        assert response.status_code == 200
+        from hackabot.apps.bot.models import Person
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.username_x == ""
+        assert "cannot contain HTML" in sent_messages[0][1]
+
+    def test_dm_x_command_rejects_invalid_characters(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        response = post_webhook(client, self._make_dm("/x alice!@#$%"))
+
+        assert response.status_code == 200
+        from hackabot.apps.bot.models import Person
+
+        person = Person.objects.get(telegram_id=12345)
+        assert person.username_x == ""
+        assert "valid username" in sent_messages[0][1]
+
     def test_dm_privacy_on(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(

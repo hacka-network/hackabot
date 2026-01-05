@@ -549,3 +549,93 @@ class TestApiNodes:
         node_map = {n["id"]: n["attending"] for n in person_data["nodes"]}
         assert node_map[str(node1.slug)] is True
         assert node_map[str(node2.slug)] is False
+
+    def test_person_display_name_xss_sanitized(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
+        Person.objects.create(
+            telegram_id=1,
+            first_name="<script>alert('xss')</script>",
+            privacy=False,
+        )
+        GroupPerson.objects.create(
+            group=group,
+            person=Person.objects.get(telegram_id=1),
+            left=False,
+        )
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        assert "<script>" not in person_data["display_name"]
+        assert "&lt;script&gt;" in person_data["display_name"]
+
+    def test_person_username_x_xss_sanitized(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            username_x="<img src=x onerror=alert('xss')>",
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        assert "<img" not in person_data["username_x"]
+        assert "&lt;img" in person_data["username_x"]
+
+    def test_person_bio_xss_sanitized(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            bio='<a href="javascript:alert(\'xss\')">Click me</a>',
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        assert "<a href" not in person_data["bio"]
+        assert "&lt;a href" in person_data["bio"]
+
+    def test_person_quotes_escaped_in_output(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name='Test" onmouseover="alert(1)',
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        assert '"' not in person_data["display_name"]
+        assert "&quot;" in person_data["display_name"]
