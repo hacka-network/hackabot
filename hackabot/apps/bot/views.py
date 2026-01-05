@@ -315,6 +315,21 @@ def _handle_dm(message_data):
     chat_id = chat_data["id"]
     print(f"📩 DM from {person.first_name}: {text[:50]}...")
 
+    is_member_of_any_node = Node.objects.filter(
+        group__groupperson__person=person,
+        group__groupperson__left=False,
+    ).exists()
+
+    if not is_member_of_any_node:
+        print("⚠️ User is not in any node, sending join prompt")
+        send(
+            chat_id,
+            "👋 Hey! I'm the bot for the Hacka* network.\n\n"
+            "To use me, you need to be a member of at least one Hacka* node.\n\n"
+            "Head to https://hacka.network to find and apply to your local one!",
+        )
+        return
+
     if text.startswith("/help") or text.startswith("/start"):
         print("📩 Processing /help or /start command")
         _handle_help_command(chat_id, person)

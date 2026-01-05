@@ -1,7 +1,3 @@
-"""
-To get the group's chat ID: https://api.telegram.org/BOT-TOKEN/getUpdates
-"""
-
 import os
 
 import requests
@@ -58,7 +54,10 @@ def verify_webhook():
     current_updates = set(result.get("allowed_updates", []))
     expected_updates = set(ALLOWED_UPDATES)
 
-    if current_url == TELEGRAM_WEBHOOK_URL and current_updates == expected_updates:
+    if (
+        current_url == TELEGRAM_WEBHOOK_URL
+        and current_updates == expected_updates
+    ):
         print(f"✅ Webhook already set to: {TELEGRAM_WEBHOOK_URL}")
         return True
 
@@ -105,7 +104,9 @@ def send(chat_id, text):
 
 
 def send_with_keyboard(chat_id, text, keyboard):
-    print(f"📤 Calling Telegram API: sendMessage with keyboard to chat {chat_id}")
+    print(
+        f"📤 Calling Telegram API: sendMessage with keyboard to chat {chat_id}"
+    )
     print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/sendMessage"
@@ -200,7 +201,9 @@ def send_poll(node, when="Thursday"):
 
     # Try to pin it
     try:
-        print(f"📤 Calling Telegram API: pinChatMessage (message {message_id})")
+        print(
+            f"📤 Calling Telegram API: pinChatMessage (message {message_id})"
+        )
         resp = requests.post(
             f"{TELEGRAM_API_BASE}/{token}/pinChatMessage",
             json=dict(
@@ -278,7 +281,9 @@ def send_weekly_attendance_summary():
         all_person_ids.add(answer.person_id)
 
     nodes_with_attendance = [
-        data for data in node_attendance.values() if len(data["person_ids"]) > 0
+        data
+        for data in node_attendance.values()
+        if len(data["person_ids"]) > 0
     ]
 
     if not nodes_with_attendance:
@@ -304,7 +309,9 @@ def send_weekly_attendance_summary():
 
     message = "\n".join(lines)
 
-    print(f"📤 Sending weekly summary to global group {global_group.telegram_id}")
+    print(
+        f"📤 Sending weekly summary to global group {global_group.telegram_id}"
+    )
     send(global_group.telegram_id, message)
     print("✅ Weekly attendance summary sent")
     return True
