@@ -16,7 +16,7 @@ if TESTING:
     HACKABOT_ENV = os.environ.get("HACKABOT_ENV", "dev")
 else:
     SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
-    HACKABOT_ENV = os.environ.get("HACKABOT_ENV")
+    HACKABOT_ENV = os.environ["HACKABOT_ENV"]
     if HACKABOT_ENV not in ("dev", "production"):
         raise RuntimeError("HACKABOT_ENV must be one of: dev/production")
 

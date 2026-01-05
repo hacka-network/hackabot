@@ -36,17 +36,6 @@ class TestGetBotToken:
             token = _get_bot_token()
             assert token == "bot123456:ABC"
 
-    def test_missing_token_raises_error(self):
-        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": ""}):
-            from hackabot.apps.bot import telegram
-
-            telegram.TELEGRAM_BOT_TOKEN = ""
-
-            with pytest.raises(RuntimeError) as exc_info:
-                _get_bot_token()
-            assert "TELEGRAM_BOT_TOKEN not set" in str(exc_info.value)
-
-
 class TestVerifyWebhook:
     @responses.activate
     def test_webhook_already_set(self):
@@ -147,16 +136,6 @@ class TestVerifyWebhook:
                 json={"ok": False, "description": "Bad Request"},
                 status=200,
             )
-
-            result = verify_webhook()
-
-            assert result is False
-
-    def test_missing_webhook_url(self):
-        with patch.dict(os.environ, {"TELEGRAM_WEBHOOK_URL": ""}):
-            from hackabot.apps.bot import telegram
-
-            telegram.TELEGRAM_WEBHOOK_URL = ""
 
             result = verify_webhook()
 

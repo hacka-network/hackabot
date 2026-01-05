@@ -1,13 +1,21 @@
 import hmac
 import os
+import sys
 
 import requests
 
 REQUEST_TIMEOUT = 30
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_WEBHOOK_URL = os.environ.get("TELEGRAM_WEBHOOK_URL", "")
-TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+TESTING = "pytest" in sys.modules
+
+if TESTING:
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "test-token")
+    TELEGRAM_WEBHOOK_URL = os.environ.get("TELEGRAM_WEBHOOK_URL", "")
+    TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+else:
+    TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+    TELEGRAM_WEBHOOK_URL = os.environ["TELEGRAM_WEBHOOK_URL"]
+    TELEGRAM_WEBHOOK_SECRET = os.environ["TELEGRAM_WEBHOOK_SECRET"]
 TELEGRAM_API_BASE = "https://api.telegram.org"
 HACKA_NETWORK_GLOBAL_CHAT_ID = "-1002257954378"
 
@@ -32,18 +40,12 @@ def verify_webhook_secret(request):
 
 def _get_bot_token():
     token = TELEGRAM_BOT_TOKEN
-    if not token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN not set in environment")
     if not token.startswith("bot"):
         token = f"bot{token}"
     return token
 
 
 def verify_webhook():
-    if not TELEGRAM_WEBHOOK_URL:
-        print("⚙️ TELEGRAM_WEBHOOK_URL not set, skipping webhook setup")
-        return False
-
     token = _get_bot_token()
 
     # Get current webhook info
