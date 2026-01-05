@@ -9,7 +9,7 @@ from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-BIO_MAX_LENGTH = 500
+BIO_MAX_LENGTH = 140
 
 
 def _sanitize_for_html(text):

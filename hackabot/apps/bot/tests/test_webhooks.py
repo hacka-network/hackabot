@@ -1782,15 +1782,15 @@ class TestBioCommand:
         )
         self._setup_member()
 
-        long_bio = "A" * 501
+        long_bio = "A" * 141
         response = post_webhook(client, self._make_dm(f"/bio {long_bio}"))
 
         assert response.status_code == 200
         person = Person.objects.get(telegram_id=12345)
         assert person.bio == ""
         assert "too long" in sent_messages[0][1]
-        assert "501" in sent_messages[0][1]
-        assert "500" in sent_messages[0][1]
+        assert "141" in sent_messages[0][1]
+        assert "140" in sent_messages[0][1]
 
     def test_bio_command_max_length_accepted(self, client, db, monkeypatch):
         monkeypatch.setattr(
@@ -1798,12 +1798,12 @@ class TestBioCommand:
         )
         self._setup_member()
 
-        bio_500 = "B" * 500
-        response = post_webhook(client, self._make_dm(f"/bio {bio_500}"))
+        bio_140 = "B" * 140
+        response = post_webhook(client, self._make_dm(f"/bio {bio_140}"))
 
         assert response.status_code == 200
         person = Person.objects.get(telegram_id=12345)
-        assert len(person.bio) == 500
+        assert len(person.bio) == 140
 
     def test_bio_command_rejects_slash_commands(self, client, db, monkeypatch):
         sent_messages = []
