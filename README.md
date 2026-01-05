@@ -95,7 +95,7 @@ heroku domains:add bot.hacka.network
 # to the DNS target shown by: heroku domains
 
 # Initial deploy
-git push heroku master
+git push heroku main
 
 # Check that it works
 open https://bot.hacka.network
