@@ -320,9 +320,9 @@ def send_weekly_attendance_summary():
     )
 
     total_attendees = len(all_person_ids)
-    lines = [f"📊 *Hacka\\* Network Weekly Attendance*"]
+    lines = [f"📊 *Hacka\\* Network Weekly Stats*"]
     lines.append("")
-    lines.append(f"🌍 *{total_attendees} people* joined across the network!")
+    lines.append(f"🌍 *{total_attendees} people* joined a weekly meetup!")
     lines.append("")
 
     nodes_with_attendance.sort(
@@ -348,7 +348,7 @@ def send_weekly_attendance_summary():
         lines.append("")
         lines.append(
             f"🏆 Biggest yapper of the week is {display_name} "
-            f"({msg_count} messages) \\- congrats!"
+            f"({msg_count} messages)"
         )
 
     message = "\n".join(lines)
