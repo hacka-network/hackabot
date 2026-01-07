@@ -910,7 +910,7 @@ class TestWeeklySummaryMessage:
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
             assert "Biggest yapper" in request_body
-            assert "alice\\_test" in request_body
+            assert "alice\\\\_test" in request_body
             assert "50 messages" in request_body
 
     @responses.activate
