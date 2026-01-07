@@ -779,6 +779,19 @@ def _get_this_weeks_attending_person_ids(node):
     return set(attending_ids)
 
 
+def _get_this_weeks_attending_count(node):
+    if not node.group:
+        return 0
+
+    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+
+    return PollAnswer.objects.filter(
+        poll__node=node,
+        poll__created__gte=seven_days_ago,
+        yes=True,
+    ).count()
+
+
 def _cors_response(response):
     response["Access-Control-Allow-Origin"] = "*"
     response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
@@ -809,6 +822,7 @@ def api_nodes(request):
             location=node.location,
             timezone=node.timezone,
             activity_level=_calculate_activity_level(node),
+            attending_count=_get_this_weeks_attending_count(node),
         )
         nodes_data.append(node_data)
         node_attending_map[node.id] = _get_this_weeks_attending_person_ids(

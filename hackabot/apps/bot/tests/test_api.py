@@ -657,3 +657,81 @@ class TestApiNodes:
         person_data = data["people"][0]
         assert '"' not in person_data["display_name"]
         assert "&quot;" in person_data["display_name"]
+
+    def test_node_attending_count_includes_privacy_mode_on(self, client, db):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group)
+
+        public_person = Person.objects.create(
+            telegram_id=1,
+            first_name="Public",
+            privacy=False,
+        )
+        private_person = Person.objects.create(
+            telegram_id=2,
+            first_name="Private",
+            privacy=True,
+        )
+
+        GroupPerson.objects.create(
+            group=group, person=public_person, left=False
+        )
+        GroupPerson.objects.create(
+            group=group, person=private_person, left=False
+        )
+
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+        )
+        PollAnswer.objects.create(poll=poll, person=public_person, yes=True)
+        PollAnswer.objects.create(poll=poll, person=private_person, yes=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        node_data = data["nodes"][0]
+        assert node_data["attending_count"] == 2
+
+    def test_node_attending_count_zero_with_no_poll(self, client, db):
+        Node.objects.all().delete()
+        node = Node.objects.create(name="Test Node")
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert data["nodes"][0]["attending_count"] == 0
+
+    def test_node_attending_count_excludes_old_polls(self, client, db):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        old_date = timezone.now() - timedelta(days=10)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+        )
+        Poll.objects.filter(pk=poll.pk).update(created=old_date)
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert data["nodes"][0]["attending_count"] == 0
