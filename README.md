@@ -68,6 +68,14 @@ uv run pytest
 The test suite uses `responses` to mock all Telegram API calls, so no external
 services are required to run tests.
 
+## Deploying to Heroku
+
+```sh
+heroku login
+heroku git:remote -a hackabot
+git push heroku main
+```
+
 ## Heroku Setup
 
 ```sh
