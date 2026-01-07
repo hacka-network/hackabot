@@ -8,6 +8,7 @@ import responses
 from django.utils import timezone
 
 from hackabot.apps.bot.models import (
+    ActivityDay,
     Event,
     Group,
     Node,
@@ -848,3 +849,119 @@ class TestWeeklySummaryMessage:
             request_body = responses.calls[0].request.body.decode()
             assert "Active Node" in request_body
             assert "Empty Node" not in request_body
+
+    @responses.activate
+    def test_summary_includes_top_talker(self, db, global_group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node_group = Group.objects.create(
+                telegram_id=-1009999999,
+                display_name="Node Group",
+            )
+            node = Node.objects.create(
+                group=node_group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_top_talker_test",
+                node=node,
+                question="Who's coming?",
+            )
+            person1 = Person.objects.create(
+                telegram_id=11111, first_name="Alice", username="alice_test"
+            )
+            person2 = Person.objects.create(
+                telegram_id=22222, first_name="Bob", username="bob"
+            )
+            PollAnswer.objects.create(poll=poll, person=person1, yes=True)
+            PollAnswer.objects.create(poll=poll, person=person2, yes=True)
+
+            today = timezone.now().date()
+            ActivityDay.objects.create(
+                person=person1,
+                group=global_group,
+                date=today,
+                message_count=50,
+            )
+            ActivityDay.objects.create(
+                person=person2,
+                group=global_group,
+                date=today,
+                message_count=10,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = friday_7am_utc
+                process_weekly_summary()
+
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Biggest yapper" in request_body
+            assert "alice\\_test" in request_body
+            assert "50 messages" in request_body
+
+    @responses.activate
+    def test_summary_shows_first_name_when_no_username(self, db, global_group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node_group = Group.objects.create(
+                telegram_id=-1009999999,
+                display_name="Node Group",
+            )
+            node = Node.objects.create(
+                group=node_group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_first_name_test",
+                node=node,
+                question="Who's coming?",
+            )
+            person = Person.objects.create(
+                telegram_id=33333, first_name="Charlie", username=""
+            )
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+            today = timezone.now().date()
+            ActivityDay.objects.create(
+                person=person,
+                group=global_group,
+                date=today,
+                message_count=25,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = friday_7am_utc
+                process_weekly_summary()
+
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Biggest yapper" in request_body
+            assert "Charlie" in request_body
+            assert "25 messages" in request_body

@@ -263,9 +263,10 @@ def send_event_reminder(event):
 def send_weekly_attendance_summary():
     from datetime import timedelta
 
+    from django.db.models import Sum
     from django.utils import timezone
 
-    from .models import Group, PollAnswer
+    from .models import ActivityDay, Group, PollAnswer
 
     print("📊 Preparing weekly attendance summary...")
 
@@ -307,6 +308,17 @@ def send_weekly_attendance_summary():
         print("📊 No attendance this week, skipping summary")
         return False
 
+    top_talker = (
+        ActivityDay.objects.filter(
+            group=global_group,
+            date__gte=one_week_ago.date(),
+        )
+        .values("person", "person__username", "person__first_name")
+        .annotate(total_messages=Sum("message_count"))
+        .order_by("-total_messages")
+        .first()
+    )
+
     total_attendees = len(all_person_ids)
     lines = [f"📊 *Hacka\\* Network Weekly Attendance*"]
     lines.append("")
@@ -323,6 +335,21 @@ def send_weekly_attendance_summary():
         count = len(data["person_ids"])
         name = f"{node.emoji} {node.name}" if node.emoji else node.name
         lines.append(f"• {name}: {count}")
+
+    if top_talker and top_talker["total_messages"] > 0:
+        username = top_talker["person__username"]
+        first_name = top_talker["person__first_name"]
+        msg_count = top_talker["total_messages"]
+        if username:
+            escaped_username = username.replace("_", "\\_")
+            display_name = f"@{escaped_username}"
+        else:
+            display_name = first_name or "Someone"
+        lines.append("")
+        lines.append(
+            f"🏆 Biggest yapper of the week is {display_name} "
+            f"({msg_count} messages) \\- congrats!"
+        )
 
     message = "\n".join(lines)
 
