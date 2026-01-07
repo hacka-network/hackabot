@@ -568,6 +568,48 @@ class TestApiNodes:
         assert node_map[str(node1.slug)] is True
         assert node_map[str(node2.slug)] is False
 
+    def test_person_nodes_sorted_attending_first(self, client, db):
+        group1 = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Group 1",
+        )
+        group2 = Group.objects.create(
+            telegram_id=-1001234567891,
+            display_name="Group 2",
+        )
+        group3 = Group.objects.create(
+            telegram_id=-1001234567892,
+            display_name="Group 3",
+        )
+        node1 = Node.objects.create(name="Node 1", group=group1)
+        node2 = Node.objects.create(name="Node 2", group=group2)
+        node3 = Node.objects.create(name="Node 3", group=group3)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+        GroupPerson.objects.create(group=group1, person=person, left=False)
+        GroupPerson.objects.create(group=group2, person=person, left=False)
+        GroupPerson.objects.create(group=group3, person=person, left=False)
+
+        poll2 = Poll.objects.create(
+            telegram_id="poll2",
+            node=node2,
+            question="Coming this week?",
+        )
+        PollAnswer.objects.create(poll=poll2, person=person, yes=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        person_data = data["people"][0]
+        nodes = person_data["nodes"]
+
+        assert nodes[0]["attending"] is True
+        assert nodes[0]["id"] == str(node2.slug)
+
     def test_person_display_name_xss_sanitized(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,

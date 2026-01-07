@@ -862,6 +862,8 @@ def api_nodes(request):
         if not person_nodes:
             continue
 
+        person_nodes.sort(key=lambda n: not n["attending"])
+
         person_data = dict(
             display_name=_sanitize_for_html(person.first_name),
             username_x=(
