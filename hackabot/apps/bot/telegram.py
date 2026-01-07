@@ -322,7 +322,7 @@ def send_weekly_attendance_summary():
     total_attendees = len(all_person_ids)
     lines = [f"📊 *Hacka\\* Network Weekly Stats*"]
     lines.append("")
-    lines.append(f"🌍 *{total_attendees} people* joined a weekly meetup!")
+    lines.append(f"🌍 *{total_attendees} people* came to one of the meetups!")
     lines.append("")
 
     nodes_with_attendance.sort(
@@ -341,10 +341,12 @@ def send_weekly_attendance_summary():
         first_name = top_talker["person__first_name"]
         msg_count = top_talker["total_messages"]
         if username:
-            escaped_username = username.replace("_", "\\_")
-            display_name = f"@{escaped_username}"
+            escaped = username.replace("_", "\\_").replace("*", "\\*")
+            display_name = f"@{escaped}"
         else:
-            display_name = first_name or "Someone"
+            escaped = (first_name or "Someone").replace("_", "\\_")
+            escaped = escaped.replace("*", "\\*")
+            display_name = escaped
         lines.append("")
         lines.append(
             f"🏆 Biggest yapper of the week is {display_name} "
