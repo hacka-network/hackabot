@@ -22,7 +22,6 @@ from .models import (
     ActivityDay,
     Group,
     GroupPerson,
-    Message,
     Node,
     Person,
     Poll,
@@ -144,17 +143,7 @@ def _handle_message(message_data):
         unix_ts = message_data.get("date", 0)
         message_dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
 
-        _, is_new_message = Message.objects.update_or_create(
-            telegram_id=message_data["message_id"],
-            group=group,
-            defaults=dict(
-                person=person,
-                date=message_dt,
-                text=message_data.get("text", ""),
-            ),
-        )
-
-        if person and is_new_message:
+        if person:
             # Update group membership and last message time
             GroupPerson.objects.update_or_create(
                 group=group,

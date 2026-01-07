@@ -218,34 +218,6 @@ class PollAnswer(models.Model):
         )
 
 
-class Message(models.Model):
-    telegram_id = models.BigIntegerField()
-    group = models.ForeignKey("Group", on_delete=models.CASCADE)
-    person = models.ForeignKey(
-        "Person", on_delete=models.CASCADE, null=True, blank=True
-    )
-    date = models.DateTimeField()
-    text = models.TextField(blank=True)
-    created = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ["telegram_id", "group"]
-
-    def __str__(self):
-        return f"Message {self.telegram_id} in {self.group}"
-
-    def to_dict(self):
-        return dict(
-            id=self.id,
-            telegram_id=self.telegram_id,
-            group_id=self.group_id,
-            person_id=self.person_id,
-            date=self.date.isoformat(),
-            text=self.text,
-            created=self.created.isoformat(),
-        )
-
-
 class ActivityDay(models.Model):
     person = models.ForeignKey("Person", on_delete=models.CASCADE)
     group = models.ForeignKey("Group", on_delete=models.CASCADE)

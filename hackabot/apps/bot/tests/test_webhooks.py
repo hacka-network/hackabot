@@ -7,7 +7,6 @@ from hackabot.apps.bot.models import (
     ActivityDay,
     Group,
     GroupPerson,
-    Message,
     Node,
     Person,
     Poll,
@@ -75,55 +74,11 @@ class TestWebhookBasicMessage:
         group = Group.objects.get(telegram_id=-1001234567890)
         assert group.display_name == "Test Group"
 
-        message = Message.objects.get(telegram_id=1, group=group)
-        assert message.text == "Hello everyone!"
-        assert message.person == person
-
         gp = GroupPerson.objects.get(group=group, person=person)
         assert gp.left is False
         assert gp.last_message_at is not None
 
         activity = ActivityDay.objects.get(person=person, group=group)
-        assert activity.message_count == 1
-
-    def test_message_deduplication(self, client, db):
-        data = {
-            "update_id": 1001,
-            "message": {
-                "message_id": 1,
-                "from": {"id": 12345, "first_name": "Alice"},
-                "chat": {"id": -1001234567890, "type": "supergroup"},
-                "date": 1704067200,
-                "text": "First message",
-            },
-        }
-
-        post_webhook(client, data)
-
-        data["message"]["text"] = "Updated message"
-        post_webhook(client, data)
-
-        assert Message.objects.count() == 1
-        message = Message.objects.first()
-        assert message.text == "Updated message"
-
-    def test_activity_not_incremented_on_duplicate(self, client, db):
-        data = {
-            "update_id": 1001,
-            "message": {
-                "message_id": 1,
-                "from": {"id": 12345, "first_name": "Alice"},
-                "chat": {"id": -1001234567890, "type": "supergroup"},
-                "date": 1704067200,
-                "text": "First message",
-            },
-        }
-
-        post_webhook(client, data)
-        post_webhook(client, data)
-        post_webhook(client, data)
-
-        activity = ActivityDay.objects.first()
         assert activity.message_count == 1
 
     def test_second_message_increments_activity(self, client, db):
@@ -144,11 +99,8 @@ class TestWebhookBasicMessage:
 
         activity = ActivityDay.objects.first()
         assert activity.message_count == 3
-        assert Message.objects.count() == 3
 
-    def test_private_chat_does_not_store_message(
-        self, client, db, monkeypatch
-    ):
+    def test_private_chat_does_not_create_group(self, client, db, monkeypatch):
         monkeypatch.setattr("hackabot.apps.bot.views.send", lambda *args: None)
         Group.objects.all().delete()
 
@@ -167,10 +119,9 @@ class TestWebhookBasicMessage:
         )
 
         assert response.status_code == 200
-        assert Message.objects.count() == 0
         assert Group.objects.count() == 0
 
-    def test_message_without_text_ignored(self, client, db):
+    def test_message_without_text_does_not_create_activity(self, client, db):
         response = post_webhook(
             client,
             {
@@ -188,9 +139,9 @@ class TestWebhookBasicMessage:
         )
 
         assert response.status_code == 200
-        assert Message.objects.count() == 0
+        assert ActivityDay.objects.count() == 0
 
-    def test_empty_text_ignored(self, client, db):
+    def test_empty_text_does_not_create_activity(self, client, db):
         response = post_webhook(
             client,
             {
@@ -206,9 +157,9 @@ class TestWebhookBasicMessage:
         )
 
         assert response.status_code == 200
-        assert Message.objects.count() == 0
+        assert ActivityDay.objects.count() == 0
 
-    def test_message_without_sender(self, client, db):
+    def test_message_without_sender_does_not_create_activity(self, client, db):
         response = post_webhook(
             client,
             {
@@ -223,49 +174,7 @@ class TestWebhookBasicMessage:
         )
 
         assert response.status_code == 200
-        message = Message.objects.first()
-        assert message.person is None
-        assert message.text == "Message without sender"
-
-    def test_unicode_message(self, client, db):
-        response = post_webhook(
-            client,
-            {
-                "update_id": 1001,
-                "message": {
-                    "message_id": 1,
-                    "from": {"id": 12345, "first_name": "Alice 🎉"},
-                    "chat": {"id": -1001234567890, "type": "supergroup"},
-                    "date": 1704067200,
-                    "text": "Hello 世界! 🎉🚀💻 Привет мир! مرحبا",
-                },
-            },
-        )
-
-        assert response.status_code == 200
-        message = Message.objects.first()
-        assert "世界" in message.text
-        assert "🎉" in message.text
-
-    def test_long_message(self, client, db):
-        long_text = "A" * 5000
-        response = post_webhook(
-            client,
-            {
-                "update_id": 1001,
-                "message": {
-                    "message_id": 1,
-                    "from": {"id": 12345, "first_name": "Alice"},
-                    "chat": {"id": -1001234567890, "type": "supergroup"},
-                    "date": 1704067200,
-                    "text": long_text,
-                },
-            },
-        )
-
-        assert response.status_code == 200
-        message = Message.objects.first()
-        assert len(message.text) == 5000
+        assert ActivityDay.objects.count() == 0
 
     def test_user_profile_update(self, client, db):
         post_webhook(
@@ -758,9 +667,9 @@ class TestWebhookEdgeCases:
         )
 
         assert response.status_code == 200
-        assert Message.objects.count() == 0
+        assert ActivityDay.objects.count() == 0
 
-    def test_edited_message_ignored(self, client, db):
+    def test_edited_message_does_not_increment_activity(self, client, db):
         post_webhook(
             client,
             {
@@ -774,6 +683,9 @@ class TestWebhookEdgeCases:
                 },
             },
         )
+
+        activity = ActivityDay.objects.first()
+        assert activity.message_count == 1
 
         response = post_webhook(
             client,
@@ -791,9 +703,8 @@ class TestWebhookEdgeCases:
         )
 
         assert response.status_code == 200
-
-        message = Message.objects.get(telegram_id=1)
-        assert message.text == "Original message"
+        activity.refresh_from_db()
+        assert activity.message_count == 1
 
     def test_callback_query_handled(self, client, db, monkeypatch):
         monkeypatch.setattr(
@@ -1232,16 +1143,6 @@ class TestWebhookDMs:
         person = Person.objects.first()
         assert person.telegram_id == 12345
         assert person.first_name == "Alice"
-
-    def test_dm_does_not_store_message(self, client, db, monkeypatch):
-        monkeypatch.setattr(
-            "hackabot.apps.bot.views.send", lambda chat_id, text: None
-        )
-
-        response = post_webhook(client, self._make_dm("/help"))
-
-        assert response.status_code == 200
-        assert Message.objects.count() == 0
 
     def test_dm_without_user_data_ignored(self, client, db, monkeypatch):
         sent_messages = []

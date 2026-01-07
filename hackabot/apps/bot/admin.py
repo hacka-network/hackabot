@@ -9,7 +9,6 @@ from .models import (
     Event,
     Group,
     GroupPerson,
-    Message,
     Node,
     Person,
     Poll,
@@ -199,29 +198,6 @@ class PollAnswerAdmin(admin.ModelAdmin):
     list_filter = ["yes"]
     ordering = ["-id"]
     raw_id_fields = ["poll", "person"]
-
-
-@admin.register(Message)
-class MessageAdmin(admin.ModelAdmin):
-    list_display = [
-        "id",
-        "telegram_id",
-        "group",
-        "person",
-        "date",
-        "text_preview",
-    ]
-    list_filter = ["group"]
-    search_fields = ["telegram_id", "text"]
-    ordering = ["-date"]
-    raw_id_fields = ["group", "person"]
-
-    def text_preview(self, obj):
-        if obj.text:
-            return obj.text[:50] + "..." if len(obj.text) > 50 else obj.text
-        return ""
-
-    text_preview.short_description = "Text"
 
 
 @admin.register(ActivityDay)
