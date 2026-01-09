@@ -3,8 +3,19 @@ import os
 import sys
 
 import requests
+from requests import HTTPError
 
 REQUEST_TIMEOUT = 30
+
+
+def _raise_for_status(resp):
+    try:
+        resp.raise_for_status()
+    except HTTPError as e:
+        raise HTTPError(
+            f"{e.response.status_code} {e.response.reason}: {e.response.text}",
+            response=e.response,
+        ) from e
 
 TESTING = "pytest" in sys.modules
 
@@ -54,7 +65,7 @@ def verify_webhook():
         f"{TELEGRAM_API_BASE}/{token}/getWebhookInfo",
         timeout=REQUEST_TIMEOUT,
     )
-    resp.raise_for_status()
+    _raise_for_status(resp)
     info = resp.json()
     print(f"📥 getWebhookInfo response: {info}")
     result = info.get("result", {})
@@ -82,7 +93,7 @@ def verify_webhook():
         json=payload,
         timeout=REQUEST_TIMEOUT,
     )
-    resp.raise_for_status()
+    _raise_for_status(resp)
     result = resp.json()
     print(f"📥 setWebhook response: {result}")
     if result.get("ok"):
@@ -109,7 +120,7 @@ def send(chat_id, text):
         timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 sendMessage response: {resp.text}")
-    resp.raise_for_status()
+    _raise_for_status(resp)
     print("✅ Message sent successfully")
 
 
@@ -132,7 +143,7 @@ def send_with_keyboard(chat_id, text, keyboard):
         timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 sendMessage response: {resp.text}")
-    resp.raise_for_status()
+    _raise_for_status(resp)
     print("✅ Message with keyboard sent successfully")
 
 
@@ -145,7 +156,7 @@ def answer_callback_query(callback_query_id, text=None):
         payload["text"] = text
     resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
     print(f"📥 answerCallbackQuery response: {resp.text}")
-    resp.raise_for_status()
+    _raise_for_status(resp)
     print("✅ Callback query answered")
 
 
@@ -159,7 +170,7 @@ def export_chat_invite_link(chat_id):
         timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 exportChatInviteLink response: {resp.text}")
-    resp.raise_for_status()
+    _raise_for_status(resp)
     result = resp.json()
     return result.get("result")
 
@@ -185,7 +196,7 @@ def send_poll(node, when="Thursday"):
         timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 sendPoll response: {resp.text}")
-    resp.raise_for_status()
+    _raise_for_status(resp)
     print("✅ Poll sent successfully")
     obj = resp.json()
     result = obj["result"]
@@ -320,7 +331,7 @@ def send_weekly_attendance_summary():
     )
 
     total_attendees = len(all_person_ids)
-    lines = [f"📊 *Hacka\\* Network Weekly Stats*"]
+    lines = ["📊 Hacka\\* *Network Weekly Stats*"]
     lines.append("")
     lines.append(f"🌍 *{total_attendees} people* came to one of the meetups!")
     lines.append("")
