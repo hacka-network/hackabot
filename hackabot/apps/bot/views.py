@@ -764,15 +764,40 @@ def _calculate_activity_level(node):
     return activity_level
 
 
+def _get_attending_window():
+    now = datetime.now(timezone.utc)
+
+    # Calculate this week's Monday 7:00 UTC (when poll is sent)
+    days_since_monday = now.weekday()
+    monday_7am = now.replace(
+        hour=7, minute=0, second=0, microsecond=0
+    ) - timedelta(days=days_since_monday)
+
+    # If we haven't reached Monday 7:00 UTC yet this week, use last week's
+    if now < monday_7am:
+        monday_7am = monday_7am - timedelta(weeks=1)
+
+    # Calculate the corresponding Friday 7:00 UTC (when summary is sent)
+    friday_7am = monday_7am + timedelta(days=4)
+
+    # If we're past Friday 7:00 UTC, we're outside the attending window
+    if now >= friday_7am:
+        return None
+
+    return monday_7am
+
+
 def _get_this_weeks_attending_person_ids(node):
     if not node.group:
         return set()
 
-    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    window_start = _get_attending_window()
+    if window_start is None:
+        return set()
 
     attending_ids = PollAnswer.objects.filter(
         poll__node=node,
-        poll__created__gte=seven_days_ago,
+        poll__created__gte=window_start,
         yes=True,
     ).values_list("person_id", flat=True)
 
@@ -783,11 +808,13 @@ def _get_this_weeks_attending_count(node):
     if not node.group:
         return 0
 
-    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    window_start = _get_attending_window()
+    if window_start is None:
+        return 0
 
     return PollAnswer.objects.filter(
         poll__node=node,
-        poll__created__gte=seven_days_ago,
+        poll__created__gte=window_start,
         yes=True,
     ).count()
 

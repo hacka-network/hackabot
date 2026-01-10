@@ -1,5 +1,6 @@
 import pytest
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
+from unittest.mock import patch
 from django.test import Client
 from django.utils import timezone
 
@@ -11,6 +12,15 @@ from hackabot.apps.bot.models import (
     Poll,
     PollAnswer,
 )
+
+
+@pytest.fixture
+def mock_attending_window():
+    wed_10am_utc = datetime(2026, 1, 7, 10, 0, 0, tzinfo=dt_timezone.utc)
+    with patch("hackabot.apps.bot.views.datetime") as mock_dt:
+        mock_dt.now.return_value = wed_10am_utc
+        mock_dt.fromtimestamp = datetime.fromtimestamp
+        yield wed_10am_utc
 
 
 @pytest.fixture
@@ -405,7 +415,9 @@ class TestApiNodes:
         data = response.json()
         assert data["nodes"][0]["activity_level"] == 0
 
-    def test_person_attending_true_for_recent_yes_vote(self, client, db):
+    def test_person_attending_true_for_recent_yes_vote(
+        self, client, db, mock_attending_window
+    ):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
@@ -424,6 +436,8 @@ class TestApiNodes:
             node=node,
             question="Coming this week?",
         )
+        mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
+        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
         PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
@@ -432,7 +446,9 @@ class TestApiNodes:
         person_data = data["people"][0]
         assert person_data["nodes"][0]["attending"] is True
 
-    def test_person_attending_false_for_no_vote(self, client, db):
+    def test_person_attending_false_for_no_vote(
+        self, client, db, mock_attending_window
+    ):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
@@ -451,6 +467,8 @@ class TestApiNodes:
             node=node,
             question="Coming this week?",
         )
+        mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
+        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
         PollAnswer.objects.create(poll=poll, person=person, yes=False)
 
         response = client.get("/api/nodes/")
@@ -459,7 +477,9 @@ class TestApiNodes:
         person_data = data["people"][0]
         assert person_data["nodes"][0]["attending"] is False
 
-    def test_person_attending_false_for_old_poll(self, client, db):
+    def test_person_attending_false_for_old_poll(
+        self, client, db, mock_attending_window
+    ):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
@@ -473,7 +493,7 @@ class TestApiNodes:
         )
         GroupPerson.objects.create(group=group, person=person, left=False)
 
-        old_date = timezone.now() - timedelta(days=10)
+        old_date = mock_attending_window - timedelta(days=10)
         poll = Poll.objects.create(
             telegram_id="poll123",
             node=node,
@@ -489,7 +509,7 @@ class TestApiNodes:
         assert person_data["nodes"][0]["attending"] is False
 
     def test_people_sorted_attending_first_then_alphabetically(
-        self, client, db
+        self, client, db, mock_attending_window
     ):
         group = Group.objects.create(
             telegram_id=-1001234567890,
@@ -520,6 +540,8 @@ class TestApiNodes:
             node=node,
             question="Coming this week?",
         )
+        mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
+        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
         PollAnswer.objects.create(poll=poll, person=charlie, yes=True)
         PollAnswer.objects.create(poll=poll, person=alice, yes=True)
         PollAnswer.objects.create(poll=poll, person=bob, yes=False)
@@ -530,7 +552,7 @@ class TestApiNodes:
         names = [p["display_name"] for p in data["people"]]
         assert names == ["Alice", "Charlie", "Bob", "David"]
 
-    def test_person_in_multiple_nodes(self, client, db):
+    def test_person_in_multiple_nodes(self, client, db, mock_attending_window):
         group1 = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Group 1",
@@ -555,6 +577,8 @@ class TestApiNodes:
             node=node1,
             question="Coming this week?",
         )
+        mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
+        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
         PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
@@ -568,7 +592,9 @@ class TestApiNodes:
         assert node_map[str(node1.slug)] is True
         assert node_map[str(node2.slug)] is False
 
-    def test_person_nodes_sorted_attending_first(self, client, db):
+    def test_person_nodes_sorted_attending_first(
+        self, client, db, mock_attending_window
+    ):
         group1 = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Group 1",
@@ -599,6 +625,8 @@ class TestApiNodes:
             node=node2,
             question="Coming this week?",
         )
+        mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
+        Poll.objects.filter(pk=poll2.pk).update(created=mon_7am)
         PollAnswer.objects.create(poll=poll2, person=person, yes=True)
 
         response = client.get("/api/nodes/")
@@ -700,7 +728,9 @@ class TestApiNodes:
         assert '"' not in person_data["display_name"]
         assert "&quot;" in person_data["display_name"]
 
-    def test_node_attending_count_includes_privacy_mode_on(self, client, db):
+    def test_node_attending_count_includes_privacy_mode_on(
+        self, client, db, mock_attending_window
+    ):
         Node.objects.all().delete()
         group = Group.objects.create(
             telegram_id=-1001234567890,
@@ -731,6 +761,8 @@ class TestApiNodes:
             node=node,
             question="Coming this week?",
         )
+        mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
+        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
         PollAnswer.objects.create(poll=poll, person=public_person, yes=True)
         PollAnswer.objects.create(poll=poll, person=private_person, yes=True)
 
@@ -749,7 +781,9 @@ class TestApiNodes:
         data = response.json()
         assert data["nodes"][0]["attending_count"] == 0
 
-    def test_node_attending_count_excludes_old_polls(self, client, db):
+    def test_node_attending_count_excludes_old_polls(
+        self, client, db, mock_attending_window
+    ):
         Node.objects.all().delete()
         group = Group.objects.create(
             telegram_id=-1001234567890,
@@ -764,7 +798,7 @@ class TestApiNodes:
         )
         GroupPerson.objects.create(group=group, person=person, left=False)
 
-        old_date = timezone.now() - timedelta(days=10)
+        old_date = mock_attending_window - timedelta(days=10)
         poll = Poll.objects.create(
             telegram_id="poll123",
             node=node,
@@ -777,3 +811,38 @@ class TestApiNodes:
 
         data = response.json()
         assert data["nodes"][0]["attending_count"] == 0
+
+    def test_attending_resets_after_friday_7am_utc(self, client, db):
+        sat_10am_utc = datetime(2026, 1, 10, 10, 0, 0, tzinfo=dt_timezone.utc)
+        with patch("hackabot.apps.bot.views.datetime") as mock_dt:
+            mock_dt.now.return_value = sat_10am_utc
+            mock_dt.fromtimestamp = datetime.fromtimestamp
+
+            group = Group.objects.create(
+                telegram_id=-1001234567890,
+                display_name="Test Group",
+            )
+            node = Node.objects.create(name="Test Node", group=group)
+
+            person = Person.objects.create(
+                telegram_id=1,
+                first_name="Alice",
+                privacy=False,
+            )
+            GroupPerson.objects.create(group=group, person=person, left=False)
+
+            mon_7am = sat_10am_utc.replace(day=5, hour=7, minute=0)
+            poll = Poll.objects.create(
+                telegram_id="poll123",
+                node=node,
+                question="Coming this week?",
+            )
+            Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+            response = client.get("/api/nodes/")
+
+            data = response.json()
+            assert data["nodes"][0]["attending_count"] == 0
+            person_data = data["people"][0]
+            assert person_data["nodes"][0]["attending"] is False
