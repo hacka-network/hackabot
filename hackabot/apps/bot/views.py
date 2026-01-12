@@ -742,25 +742,91 @@ def _calculate_activity_level(node):
     else:
         last_complete_week_end = thursday_end
 
-    # Look back 4 weeks from the end of the last complete week
-    four_weeks_before = last_complete_week_end - timedelta(weeks=4)
+    # Weights for recency: most recent week = 4, oldest = 1
+    weights = [4, 3, 2, 1]
 
-    # Query polls for this node within this window
-    polls = Poll.objects.filter(
-        node=node,
-        created__gt=four_weeks_before,
-        created__lte=last_complete_week_end,
-    )
+    # Calculate weighted average attendance from polls
+    weighted_attendance_sum = 0
+    attendance_weight_sum = 0
 
-    poll_count = polls.count()
-    if poll_count == 0:
+    for i in range(4):
+        week_end = last_complete_week_end - timedelta(weeks=i)
+        week_start = week_end - timedelta(weeks=1)
+
+        week_polls = Poll.objects.filter(
+            node=node,
+            created__gt=week_start,
+            created__lte=week_end,
+        )
+        week_poll_count = week_polls.count()
+
+        if week_poll_count > 0:
+            week_yes = sum(p.yes_count for p in week_polls)
+            week_avg = week_yes / week_poll_count
+            weighted_attendance_sum += week_avg * weights[i]
+            attendance_weight_sum += weights[i]
+
+    if attendance_weight_sum == 0:
         return 0
 
-    total_yes = sum(poll.yes_count for poll in polls)
-    average_attendees = total_yes / poll_count
+    average_attendees = weighted_attendance_sum / attendance_weight_sum
 
-    # Scale: 8+ attendees = 10, 0 = 0, linear in between
-    activity_level = min(10, round(average_attendees * 10 / 8))
+    # Absolute score: 8+ attendees = 10, 0 = 0, linear in between
+    absolute_score = min(10, average_attendees * 10 / 8)
+
+    # Get member count and chat activity for participation/chat scores
+    member_count = 0
+    chat_score = 0
+    if node.group:
+        member_count = GroupPerson.objects.filter(
+            group=node.group, left=False
+        ).count()
+
+        # Chat activity: weighted average messages per week
+        weighted_msgs_sum = 0
+        msgs_weight_sum = 0
+
+        for i in range(4):
+            week_end_date = (
+                last_complete_week_end - timedelta(weeks=i)
+            ).date()
+            week_start_date = (
+                last_complete_week_end - timedelta(weeks=i + 1)
+            ).date()
+
+            week_messages = (
+                ActivityDay.objects.filter(
+                    group=node.group,
+                    date__gt=week_start_date,
+                    date__lte=week_end_date,
+                ).aggregate(total=Sum("message_count"))["total"]
+                or 0
+            )
+            weighted_msgs_sum += week_messages * weights[i]
+            msgs_weight_sum += weights[i]
+
+        # 50+ msgs/week = 10
+        if msgs_weight_sum > 0:
+            msgs_per_week = weighted_msgs_sum / msgs_weight_sum
+            chat_score = min(10, msgs_per_week * 10 / 50)
+
+    # If no members tracked, blend absolute + chat scores (if any)
+    if member_count == 0:
+        if chat_score > 0:
+            return round((absolute_score + chat_score) / 2)
+        return round(absolute_score)
+
+    # Participation score: 50%+ of members attending = 10
+    participation_rate = average_attendees / member_count
+    participation_score = min(10, participation_rate * 10 / 0.5)
+
+    # Blend scores: include chat only if there's chat activity
+    if chat_score > 0:
+        activity_level = round(
+            (absolute_score + participation_score + chat_score) / 3
+        )
+    else:
+        activity_level = round((absolute_score + participation_score) / 2)
     return activity_level
 
 
