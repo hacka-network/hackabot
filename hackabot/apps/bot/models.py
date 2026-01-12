@@ -108,6 +108,7 @@ class Node(models.Model):
         max_length=50, default="UTC", help_text="e.g. Europe/Paris"
     )
     last_poll_sent_at = models.DateTimeField(null=True, blank=True)
+    disabled = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.emoji} {self.name}" if self.emoji else self.name

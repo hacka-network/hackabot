@@ -846,3 +846,61 @@ class TestApiNodes:
             assert data["nodes"][0]["attending_count"] == 0
             person_data = data["people"][0]
             assert person_data["nodes"][0]["attending"] is False
+
+    def test_disabled_node_has_no_activity_level(self, client, db):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(
+            name="Disabled Node",
+            group=group,
+            timezone="UTC",
+            disabled=True,
+        )
+
+        two_weeks_ago = timezone.now() - timedelta(weeks=2)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+            yes_count=8,
+        )
+        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        node_data = data["nodes"][0]
+        assert node_data["disabled"] is True
+        assert node_data["activity_level"] is None
+
+    def test_enabled_node_has_activity_level(self, client, db):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(
+            name="Active Node",
+            group=group,
+            timezone="UTC",
+            disabled=False,
+        )
+
+        two_weeks_ago = timezone.now() - timedelta(weeks=2)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming this week?",
+            yes_count=8,
+        )
+        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        node_data = data["nodes"][0]
+        assert node_data["disabled"] is False
+        assert node_data["activity_level"] == 10

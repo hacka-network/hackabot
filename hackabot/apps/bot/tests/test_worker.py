@@ -452,6 +452,12 @@ class TestCheckAllNodes:
                 name="Node without group",
                 timezone="UTC",
             )
+            Node.objects.create(
+                group=group,
+                name="Disabled Node",
+                timezone="America/New_York",
+                disabled=True,
+            )
 
             responses.add(
                 responses.POST,
@@ -603,6 +609,43 @@ class TestDynamicNodeHandling:
             new_node.refresh_from_db()
             assert new_node.last_poll_sent_at is not None
             assert len(responses.calls) == 3
+
+
+class TestDisabledNodes:
+    @responses.activate
+    def test_disabled_nodes_skipped_by_check_all_nodes(self, db, group):
+        Node.objects.all().delete()
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            Node.objects.create(
+                group=group,
+                name="Disabled Node",
+                timezone="America/New_York",
+                disabled=True,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendPoll",
+                json={
+                    "ok": True,
+                    "result": {
+                        "message_id": 1002,
+                        "poll": {"id": "poll_123", "question": "Test?"},
+                    },
+                },
+                status=200,
+            )
+
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
+            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
+                mock_arrow.now.return_value = monday_7am_utc
+                check_all_nodes()
+
+            assert len(responses.calls) == 0
 
 
 class TestShouldSendWeeklySummary:

@@ -150,7 +150,9 @@ def process_weekly_summary():
 def check_all_nodes():
     from hackabot.apps.bot.models import Node
 
-    nodes = Node.objects.filter(group__isnull=False).select_related("group")
+    nodes = Node.objects.filter(
+        group__isnull=False, disabled=False
+    ).select_related("group")
 
     for node in nodes:
         process_node_poll(node)

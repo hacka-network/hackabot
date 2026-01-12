@@ -122,6 +122,7 @@ class NodeAdmin(admin.ModelAdmin):
     list_display = [
         "id",
         "name",
+        "disabled",
         "emoji",
         "slug",
         "location",
@@ -134,6 +135,8 @@ class NodeAdmin(admin.ModelAdmin):
         "group",
         "created",
     ]
+    list_filter = ["disabled"]
+    list_editable = ["disabled"]
 
     @admin.display(boolean=True, description="Group")
     def has_group(self, obj):

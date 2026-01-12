@@ -848,7 +848,10 @@ def api_nodes(request):
             established=node.established,
             location=node.location,
             timezone=node.timezone,
-            activity_level=_calculate_activity_level(node),
+            disabled=node.disabled,
+            activity_level=(
+                None if node.disabled else _calculate_activity_level(node)
+            ),
             attending_count=_get_this_weeks_attending_count(node),
         )
         nodes_data.append(node_data)
