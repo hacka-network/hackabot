@@ -1086,7 +1086,7 @@ def api_recent_photos(request):
     two_weeks_ago = django_timezone.now() - timedelta(weeks=2)
     photos = MeetupPhoto.objects.filter(
         created__gte=two_weeks_ago
-    ).select_related("node")[:9]
+    ).select_related("node")[:12]
 
     photos_data = []
     for photo in photos:

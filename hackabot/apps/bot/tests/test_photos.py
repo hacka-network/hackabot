@@ -568,8 +568,8 @@ class TestPhotoAPI:
         assert data["photos"][0]["node_name"] == "Hackatestville"
         assert data["photos"][0]["node_emoji"] == "🧪"
 
-    def test_api_recent_photos_limits_to_9(self, client, db, test_node):
-        for i in range(15):
+    def test_api_recent_photos_limits_to_12(self, client, db, test_node):
+        for i in range(20):
             MeetupPhoto.objects.create(
                 node=test_node,
                 telegram_file_id=f"photo{i}",
@@ -580,7 +580,7 @@ class TestPhotoAPI:
 
         assert response.status_code == 200
         data = response.json()
-        assert len(data["photos"]) == 9
+        assert len(data["photos"]) == 12
 
     def test_api_recent_photos_cors_headers(self, client, db):
         response = client.get("/api/photos/")
