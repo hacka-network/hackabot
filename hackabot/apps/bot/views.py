@@ -925,35 +925,50 @@ def api_nodes(request):
             node
         )
 
+    # Build map of person -> nodes they've attended (answered yes to any poll)
+    person_attended_nodes = {}
+    poll_answers = PollAnswer.objects.filter(
+        yes=True,
+        poll__node__isnull=False,
+    ).select_related("poll__node")
+
+    for pa in poll_answers:
+        if pa.person_id not in person_attended_nodes:
+            person_attended_nodes[pa.person_id] = set()
+        person_attended_nodes[pa.person_id].add(pa.poll.node_id)
+
+    # Build node lookup by id
+    node_lookup = {node.id: node for node in nodes}
+
+    # Get people who have attended at least one node and have public profile
     people = (
         Person.objects.filter(
-            groupperson__left=False,
-            groupperson__group__node__isnull=False,
+            id__in=person_attended_nodes.keys(),
             privacy=False,
         )
         .filter(Q(first_name__gt="") | Q(username_x__gt=""))
-        .prefetch_related("groupperson_set__group__node_set")
         .distinct()
     )
 
     people_data = []
     for person in people:
+        attended_node_ids = person_attended_nodes.get(person.id, set())
         person_nodes = []
         is_attending_any = False
 
-        for gp in person.groupperson_set.all():
-            if gp.left:
+        for node_id in attended_node_ids:
+            node = node_lookup.get(node_id)
+            if not node:
                 continue
-            for node in gp.group.node_set.all():
-                attending = person.id in node_attending_map.get(node.id, set())
-                if attending:
-                    is_attending_any = True
-                person_nodes.append(
-                    dict(
-                        id=str(node.slug),
-                        attending=attending,
-                    )
+            attending = person.id in node_attending_map.get(node_id, set())
+            if attending:
+                is_attending_any = True
+            person_nodes.append(
+                dict(
+                    id=str(node.slug),
+                    attending=attending,
                 )
+            )
 
         if not person_nodes:
             continue

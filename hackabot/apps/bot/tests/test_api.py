@@ -128,12 +128,13 @@ class TestApiNodes:
             privacy=True,
         )
 
-        GroupPerson.objects.create(
-            group=group, person=public_person, left=False
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
         )
-        GroupPerson.objects.create(
-            group=group, person=private_person, left=False
-        )
+        PollAnswer.objects.create(poll=poll, person=public_person, yes=True)
+        PollAnswer.objects.create(poll=poll, person=private_person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -168,14 +169,15 @@ class TestApiNodes:
             privacy=False,
         )
 
-        GroupPerson.objects.create(
-            group=group, person=person_with_name, left=False
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
         )
-        GroupPerson.objects.create(
-            group=group, person=person_with_x, left=False
-        )
-        GroupPerson.objects.create(
-            group=group, person=person_with_nothing, left=False
+        PollAnswer.objects.create(poll=poll, person=person_with_name, yes=True)
+        PollAnswer.objects.create(poll=poll, person=person_with_x, yes=True)
+        PollAnswer.objects.create(
+            poll=poll, person=person_with_nothing, yes=True
         )
 
         response = client.get("/api/nodes/")
@@ -188,35 +190,40 @@ class TestApiNodes:
         assert "Has Name" in display_names
         assert "" in display_names
 
-    def test_people_excludes_left_members(self, client, db):
+    def test_people_only_shows_those_who_attended(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
         node = Node.objects.create(name="Test Node", group=group)
 
-        active_person = Person.objects.create(
+        attended_person = Person.objects.create(
             telegram_id=1,
-            first_name="Active",
+            first_name="Attended",
             privacy=False,
         )
-        left_person = Person.objects.create(
+        never_attended_person = Person.objects.create(
             telegram_id=2,
-            first_name="Left",
+            first_name="Never Attended",
             privacy=False,
         )
 
-        GroupPerson.objects.create(
-            group=group, person=active_person, left=False
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
         )
-        GroupPerson.objects.create(group=group, person=left_person, left=True)
+        PollAnswer.objects.create(poll=poll, person=attended_person, yes=True)
+        PollAnswer.objects.create(
+            poll=poll, person=never_attended_person, yes=False
+        )
 
         response = client.get("/api/nodes/")
 
         data = response.json()
         people = data["people"]
         assert len(people) == 1
-        assert people[0]["display_name"] == "Active"
+        assert people[0]["display_name"] == "Attended"
 
     def test_person_fields(self, client, db):
         group = Group.objects.create(
@@ -232,7 +239,12 @@ class TestApiNodes:
             bio="Building cool stuff",
             privacy=False,
         )
-        GroupPerson.objects.create(group=group, person=person, left=False)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -258,7 +270,12 @@ class TestApiNodes:
             bio="",
             privacy=False,
         )
-        GroupPerson.objects.create(group=group, person=person, left=False)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -279,7 +296,12 @@ class TestApiNodes:
             username_x="",
             privacy=False,
         )
-        GroupPerson.objects.create(group=group, person=person, left=False)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -451,7 +473,7 @@ class TestApiNodes:
         person_data = data["people"][0]
         assert person_data["nodes"][0]["attending"] is True
 
-    def test_person_attending_false_for_no_vote(
+    def test_person_attending_false_when_said_no_this_week(
         self, client, db, mock_attending_window
     ):
         group = Group.objects.create(
@@ -465,16 +487,24 @@ class TestApiNodes:
             first_name="Alice",
             privacy=False,
         )
-        GroupPerson.objects.create(group=group, person=person, left=False)
 
-        poll = Poll.objects.create(
-            telegram_id="poll123",
+        old_poll = Poll.objects.create(
+            telegram_id="poll_old",
+            node=node,
+            question="Coming last week?",
+        )
+        old_date = mock_attending_window - timedelta(days=10)
+        Poll.objects.filter(pk=old_poll.pk).update(created=old_date)
+        PollAnswer.objects.create(poll=old_poll, person=person, yes=True)
+
+        current_poll = Poll.objects.create(
+            telegram_id="poll_current",
             node=node,
             question="Coming this week?",
         )
         mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
-        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
-        PollAnswer.objects.create(poll=poll, person=person, yes=False)
+        Poll.objects.filter(pk=current_poll.pk).update(created=mon_7am)
+        PollAnswer.objects.create(poll=current_poll, person=person, yes=False)
 
         response = client.get("/api/nodes/")
 
@@ -535,21 +565,27 @@ class TestApiNodes:
             telegram_id=4, first_name="David", privacy=False
         )
 
-        GroupPerson.objects.create(group=group, person=alice, left=False)
-        GroupPerson.objects.create(group=group, person=bob, left=False)
-        GroupPerson.objects.create(group=group, person=charlie, left=False)
-        GroupPerson.objects.create(group=group, person=david, left=False)
+        old_poll = Poll.objects.create(
+            telegram_id="poll_old",
+            node=node,
+            question="Coming last week?",
+        )
+        old_date = mock_attending_window - timedelta(days=10)
+        Poll.objects.filter(pk=old_poll.pk).update(created=old_date)
+        PollAnswer.objects.create(poll=old_poll, person=alice, yes=True)
+        PollAnswer.objects.create(poll=old_poll, person=bob, yes=True)
+        PollAnswer.objects.create(poll=old_poll, person=charlie, yes=True)
+        PollAnswer.objects.create(poll=old_poll, person=david, yes=True)
 
-        poll = Poll.objects.create(
-            telegram_id="poll123",
+        current_poll = Poll.objects.create(
+            telegram_id="poll_current",
             node=node,
             question="Coming this week?",
         )
         mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
-        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
-        PollAnswer.objects.create(poll=poll, person=charlie, yes=True)
-        PollAnswer.objects.create(poll=poll, person=alice, yes=True)
-        PollAnswer.objects.create(poll=poll, person=bob, yes=False)
+        Poll.objects.filter(pk=current_poll.pk).update(created=mon_7am)
+        PollAnswer.objects.create(poll=current_poll, person=charlie, yes=True)
+        PollAnswer.objects.create(poll=current_poll, person=alice, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -574,17 +610,24 @@ class TestApiNodes:
             first_name="Alice",
             privacy=False,
         )
-        GroupPerson.objects.create(group=group1, person=person, left=False)
-        GroupPerson.objects.create(group=group2, person=person, left=False)
 
-        poll = Poll.objects.create(
-            telegram_id="poll123",
+        old_poll2 = Poll.objects.create(
+            telegram_id="poll_old_node2",
+            node=node2,
+            question="Coming last week?",
+        )
+        old_date = mock_attending_window - timedelta(days=10)
+        Poll.objects.filter(pk=old_poll2.pk).update(created=old_date)
+        PollAnswer.objects.create(poll=old_poll2, person=person, yes=True)
+
+        poll1 = Poll.objects.create(
+            telegram_id="poll_node1",
             node=node1,
             question="Coming this week?",
         )
         mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
-        Poll.objects.filter(pk=poll.pk).update(created=mon_7am)
-        PollAnswer.objects.create(poll=poll, person=person, yes=True)
+        Poll.objects.filter(pk=poll1.pk).update(created=mon_7am)
+        PollAnswer.objects.create(poll=poll1, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -648,18 +691,19 @@ class TestApiNodes:
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        Node.objects.create(name="Test Node", group=group)
+        node = Node.objects.create(name="Test Node", group=group)
 
-        Person.objects.create(
+        person = Person.objects.create(
             telegram_id=1,
             first_name="<script>alert('xss')</script>",
             privacy=False,
         )
-        GroupPerson.objects.create(
-            group=group,
-            person=Person.objects.get(telegram_id=1),
-            left=False,
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
         )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -673,7 +717,7 @@ class TestApiNodes:
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        Node.objects.create(name="Test Node", group=group)
+        node = Node.objects.create(name="Test Node", group=group)
 
         person = Person.objects.create(
             telegram_id=1,
@@ -681,7 +725,12 @@ class TestApiNodes:
             username_x="<img src=x onerror=alert('xss')>",
             privacy=False,
         )
-        GroupPerson.objects.create(group=group, person=person, left=False)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -695,7 +744,7 @@ class TestApiNodes:
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        Node.objects.create(name="Test Node", group=group)
+        node = Node.objects.create(name="Test Node", group=group)
 
         person = Person.objects.create(
             telegram_id=1,
@@ -703,7 +752,12 @@ class TestApiNodes:
             bio="<a href=\"javascript:alert('xss')\">Click me</a>",
             privacy=False,
         )
-        GroupPerson.objects.create(group=group, person=person, left=False)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
@@ -717,14 +771,19 @@ class TestApiNodes:
             telegram_id=-1001234567890,
             display_name="Test Group",
         )
-        Node.objects.create(name="Test Node", group=group)
+        node = Node.objects.create(name="Test Node", group=group)
 
         person = Person.objects.create(
             telegram_id=1,
             first_name='Test" onmouseover="alert(1)',
             privacy=False,
         )
-        GroupPerson.objects.create(group=group, person=person, left=False)
+        poll = Poll.objects.create(
+            telegram_id="poll123",
+            node=node,
+            question="Coming?",
+        )
+        PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
 
