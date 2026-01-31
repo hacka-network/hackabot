@@ -21,6 +21,7 @@ from .models import (
     PollAnswer,
 )
 from .telegram import (
+    HACKA_NETWORK_GLOBAL_CHAT_ID,
     answer_callback_query,
     download_file,
     is_chat_admin,
@@ -1058,12 +1059,17 @@ def api_nodes(request):
     people_data.sort(key=lambda x: (not x[0], x[1]))
     people_list = [p[2] for p in people_data]
 
-    node_groups = Node.objects.filter(group__isnull=False).values_list(
-        "group_id", flat=True
+    node_group_ids = list(
+        Node.objects.filter(group__isnull=False).values_list("group_id", flat=True)
     )
+    global_group = Group.objects.filter(
+        telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID)
+    ).first()
+    if global_group:
+        node_group_ids.append(global_group.id)
     people_count = (
         Person.objects.filter(
-            groupperson__group_id__in=node_groups,
+            groupperson__group_id__in=node_group_ids,
             groupperson__left=False,
         )
         .distinct()
