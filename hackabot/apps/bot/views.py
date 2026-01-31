@@ -979,5 +979,20 @@ def api_nodes(request):
     people_data.sort(key=lambda x: (not x[0], x[1]))
     people_list = [p[2] for p in people_data]
 
-    response = JsonResponse(dict(nodes=nodes_data, people=people_list))
+    node_groups = Node.objects.filter(group__isnull=False).values_list(
+        "group_id", flat=True
+    )
+    people_count = (
+        Person.objects.filter(
+            groupperson__group_id__in=node_groups,
+            groupperson__left=False,
+        )
+        .distinct()
+        .count()
+    )
+    stats = dict(people_count=people_count)
+
+    response = JsonResponse(
+        dict(nodes=nodes_data, people=people_list, stats=stats)
+    )
     return _cors_response(response)

@@ -36,7 +36,11 @@ class TestApiNodes:
         response = client.get("/api/nodes/")
 
         assert response.status_code == 200
-        assert response.json() == {"nodes": [], "people": []}
+        assert response.json() == {
+            "nodes": [],
+            "people": [],
+            "stats": {"people_count": 0},
+        }
 
     def test_cors_headers(self, client, db):
         response = client.get("/api/nodes/")
@@ -1164,3 +1168,140 @@ class TestApiNodes:
 
         data = response.json()
         assert data["nodes"][0]["activity_level"] == 8
+
+    def test_stats_people_count_includes_all_users_in_node_groups(
+        self, client, db
+    ):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
+        public_person = Person.objects.create(
+            telegram_id=1,
+            first_name="Public",
+            privacy=False,
+        )
+        private_person = Person.objects.create(
+            telegram_id=2,
+            first_name="Private",
+            privacy=True,
+        )
+
+        GroupPerson.objects.create(
+            group=group, person=public_person, left=False
+        )
+        GroupPerson.objects.create(
+            group=group, person=private_person, left=False
+        )
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert data["stats"]["people_count"] == 2
+
+    def test_stats_people_count_excludes_left_members(self, client, db):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        Node.objects.create(name="Test Node", group=group)
+
+        active_person = Person.objects.create(
+            telegram_id=1,
+            first_name="Active",
+            privacy=False,
+        )
+        left_person = Person.objects.create(
+            telegram_id=2,
+            first_name="Left",
+            privacy=False,
+        )
+
+        GroupPerson.objects.create(
+            group=group, person=active_person, left=False
+        )
+        GroupPerson.objects.create(group=group, person=left_person, left=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert data["stats"]["people_count"] == 1
+
+    def test_stats_people_count_excludes_groups_without_nodes(self, client, db):
+        Node.objects.all().delete()
+        node_group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Node Group",
+        )
+        orphan_group = Group.objects.create(
+            telegram_id=-1001234567891,
+            display_name="Orphan Group",
+        )
+        Node.objects.create(name="Test Node", group=node_group)
+
+        node_person = Person.objects.create(
+            telegram_id=1,
+            first_name="Node Person",
+        )
+        orphan_person = Person.objects.create(
+            telegram_id=2,
+            first_name="Orphan Person",
+        )
+
+        GroupPerson.objects.create(
+            group=node_group, person=node_person, left=False
+        )
+        GroupPerson.objects.create(
+            group=orphan_group, person=orphan_person, left=False
+        )
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert data["stats"]["people_count"] == 1
+
+    def test_stats_people_count_counts_unique_people_across_nodes(
+        self, client, db
+    ):
+        Node.objects.all().delete()
+        group1 = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Group 1",
+        )
+        group2 = Group.objects.create(
+            telegram_id=-1001234567891,
+            display_name="Group 2",
+        )
+        Node.objects.create(name="Node 1", group=group1)
+        Node.objects.create(name="Node 2", group=group2)
+
+        shared_person = Person.objects.create(
+            telegram_id=1,
+            first_name="Shared",
+        )
+        person1 = Person.objects.create(
+            telegram_id=2,
+            first_name="Person 1",
+        )
+        person2 = Person.objects.create(
+            telegram_id=3,
+            first_name="Person 2",
+        )
+
+        GroupPerson.objects.create(
+            group=group1, person=shared_person, left=False
+        )
+        GroupPerson.objects.create(
+            group=group2, person=shared_person, left=False
+        )
+        GroupPerson.objects.create(group=group1, person=person1, left=False)
+        GroupPerson.objects.create(group=group2, person=person2, left=False)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert data["stats"]["people_count"] == 3
