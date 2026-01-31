@@ -224,7 +224,7 @@ class MeetupPhotoAdmin(admin.ModelAdmin):
     search_fields = ["node__name", "uploaded_by__first_name", "uploaded_by__username"]
     ordering = ["-created"]
     raw_id_fields = ["node", "uploaded_by"]
-    readonly_fields = ["telegram_file_id", "preview_large", "size_kb", "created"]
+    readonly_fields = ["telegram_file_id", "preview_large", "size_kb"]
 
     @admin.display(description="Preview")
     def preview_thumb(self, obj):

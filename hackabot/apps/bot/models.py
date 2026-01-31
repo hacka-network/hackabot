@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.utils import timezone
 
 
 class Group(models.Model):
@@ -250,7 +251,7 @@ class MeetupPhoto(models.Model):
     uploaded_by = models.ForeignKey(
         "Person", on_delete=models.SET_NULL, null=True, blank=True
     )
-    created = models.DateTimeField(auto_now_add=True)
+    created = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ["-created"]
