@@ -4,7 +4,7 @@ import re
 import zoneinfo
 from datetime import datetime, timedelta, timezone
 
-from django.db.models import F, Q, Sum
+from django.db.models import F, Q
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -716,120 +716,6 @@ def telegram_webhook(request):
     return JsonResponse(dict(ok=True))
 
 
-def _calculate_activity_level(node):
-    if not node:
-        return 0
-
-    try:
-        tz = zoneinfo.ZoneInfo(node.timezone)
-    except zoneinfo.ZoneInfoNotFoundError:
-        tz = zoneinfo.ZoneInfo("UTC")
-
-    now = datetime.now(tz)
-
-    # Find the most recent Thursday at midnight
-    days_since_thursday = (now.weekday() - 3) % 7
-    thursday_midnight = now.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ) - timedelta(days=days_since_thursday)
-
-    # Week ends at Thursday 23:59
-    thursday_end = thursday_midnight.replace(hour=23, minute=59)
-
-    # If we haven't reached the end of this week yet, go back a week
-    if now <= thursday_end:
-        last_complete_week_end = thursday_end - timedelta(weeks=1)
-    else:
-        last_complete_week_end = thursday_end
-
-    # Weights for recency: most recent week = 4, oldest = 1
-    weights = [4, 3, 2, 1]
-
-    # Calculate weighted average attendance from polls
-    weighted_attendance_sum = 0
-    attendance_weight_sum = 0
-
-    for i in range(4):
-        week_end = last_complete_week_end - timedelta(weeks=i)
-        week_start = week_end - timedelta(weeks=1)
-
-        week_polls = Poll.objects.filter(
-            node=node,
-            created__gt=week_start,
-            created__lte=week_end,
-        )
-        week_poll_count = week_polls.count()
-
-        if week_poll_count > 0:
-            week_yes = sum(p.yes_count for p in week_polls)
-            week_avg = week_yes / week_poll_count
-            weighted_attendance_sum += week_avg * weights[i]
-            attendance_weight_sum += weights[i]
-
-    if attendance_weight_sum == 0:
-        return 0
-
-    average_attendees = weighted_attendance_sum / attendance_weight_sum
-
-    # Absolute score: 8+ attendees = 10, 0 = 0, linear in between
-    absolute_score = min(10, average_attendees * 10 / 8)
-
-    # Get member count and chat activity for participation/chat scores
-    member_count = 0
-    chat_score = 0
-    if node.group:
-        member_count = GroupPerson.objects.filter(
-            group=node.group, left=False
-        ).count()
-
-        # Chat activity: weighted average messages per week
-        weighted_msgs_sum = 0
-        msgs_weight_sum = 0
-
-        for i in range(4):
-            week_end_date = (
-                last_complete_week_end - timedelta(weeks=i)
-            ).date()
-            week_start_date = (
-                last_complete_week_end - timedelta(weeks=i + 1)
-            ).date()
-
-            week_messages = (
-                ActivityDay.objects.filter(
-                    group=node.group,
-                    date__gt=week_start_date,
-                    date__lte=week_end_date,
-                ).aggregate(total=Sum("message_count"))["total"]
-                or 0
-            )
-            weighted_msgs_sum += week_messages * weights[i]
-            msgs_weight_sum += weights[i]
-
-        # 50+ msgs/week = 10
-        if msgs_weight_sum > 0:
-            msgs_per_week = weighted_msgs_sum / msgs_weight_sum
-            chat_score = min(10, msgs_per_week * 10 / 50)
-
-    # If no members tracked, blend absolute + chat scores (if any)
-    if member_count == 0:
-        if chat_score > 0:
-            return round((absolute_score + chat_score) / 2)
-        return round(absolute_score)
-
-    # Participation score: 50%+ of members attending = 10
-    participation_rate = average_attendees / member_count
-    participation_score = min(10, participation_rate * 10 / 0.5)
-
-    # Blend scores: include chat only if there's chat activity
-    if chat_score > 0:
-        activity_level = round(
-            (absolute_score + participation_score + chat_score) / 3
-        )
-    else:
-        activity_level = round((absolute_score + participation_score) / 2)
-    return activity_level
-
-
 def _get_attending_window():
     now = datetime.now(timezone.utc)
 
@@ -915,9 +801,6 @@ def api_nodes(request):
             location=node.location,
             timezone=node.timezone,
             disabled=node.disabled,
-            activity_level=(
-                None if node.disabled else _calculate_activity_level(node)
-            ),
             attending_count=_get_this_weeks_attending_count(node),
         )
         nodes_data.append(node_data)
@@ -937,13 +820,37 @@ def api_nodes(request):
             person_attended_nodes[pa.person_id] = set()
         person_attended_nodes[pa.person_id].add(pa.poll.node_id)
 
+    # Build map of person -> their most recent chatted node (fallback)
+    # First get all groups that have a node
+    groups_with_nodes = {
+        node.group_id: node.id for node in nodes if node.group_id
+    }
+
+    person_last_chatted_node = {}
+    group_memberships = (
+        GroupPerson.objects.filter(
+            left=False,
+            last_message_at__isnull=False,
+            group_id__in=groups_with_nodes.keys(),
+        )
+        .order_by("person_id", "-last_message_at")
+    )
+    for gp in group_memberships:
+        if gp.person_id not in person_last_chatted_node:
+            person_last_chatted_node[gp.person_id] = groups_with_nodes[
+                gp.group_id
+            ]
+
     # Build node lookup by id
     node_lookup = {node.id: node for node in nodes}
 
-    # Get people who have attended at least one node and have public profile
+    # Get people with public profile who have attended OR chatted
+    candidate_person_ids = set(person_attended_nodes.keys()) | set(
+        person_last_chatted_node.keys()
+    )
     people = (
         Person.objects.filter(
-            id__in=person_attended_nodes.keys(),
+            id__in=candidate_person_ids,
             privacy=False,
         )
         .filter(Q(first_name__gt="") | Q(username_x__gt=""))
@@ -956,19 +863,33 @@ def api_nodes(request):
         person_nodes = []
         is_attending_any = False
 
-        for node_id in attended_node_ids:
-            node = node_lookup.get(node_id)
-            if not node:
-                continue
-            attending = person.id in node_attending_map.get(node_id, set())
-            if attending:
-                is_attending_any = True
-            person_nodes.append(
-                dict(
-                    id=str(node.slug),
-                    attending=attending,
+        if attended_node_ids:
+            # Use nodes they've attended via poll
+            for node_id in attended_node_ids:
+                node = node_lookup.get(node_id)
+                if not node:
+                    continue
+                attending = person.id in node_attending_map.get(node_id, set())
+                if attending:
+                    is_attending_any = True
+                person_nodes.append(
+                    dict(
+                        id=str(node.slug),
+                        attending=attending,
+                    )
                 )
-            )
+        else:
+            # Fallback to last chatted node
+            fallback_node_id = person_last_chatted_node.get(person.id)
+            if fallback_node_id:
+                node = node_lookup.get(fallback_node_id)
+                if node:
+                    person_nodes.append(
+                        dict(
+                            id=str(node.slug),
+                            attending=False,
+                        )
+                    )
 
         if not person_nodes:
             continue

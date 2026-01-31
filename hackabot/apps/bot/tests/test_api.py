@@ -83,7 +83,6 @@ class TestApiNodes:
         assert node_data["established"] == 2020
         assert node_data["location"] == ""
         assert node_data["timezone"] == "UTC"
-        assert node_data["activity_level"] == 0
         assert "people" not in node_data
         assert data["people"] == []
 
@@ -225,6 +224,34 @@ class TestApiNodes:
         assert len(people) == 1
         assert people[0]["display_name"] == "Attended"
 
+    def test_person_fallback_to_last_chatted_node(self, client, db):
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="Test Node", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Chatter",
+            privacy=False,
+        )
+        GroupPerson.objects.create(
+            group=group,
+            person=person,
+            left=False,
+            last_message_at=timezone.now(),
+        )
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        people = data["people"]
+        assert len(people) == 1
+        assert people[0]["display_name"] == "Chatter"
+        assert people[0]["nodes"][0]["id"] == str(node.slug)
+        assert people[0]["nodes"][0]["attending"] is False
+
     def test_person_fields(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,
@@ -316,131 +343,6 @@ class TestApiNodes:
 
         data = response.json()
         assert data["people"] == []
-
-    def test_activity_level_zero_with_no_polls(self, client, db):
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(name="Test Node", group=group)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 0
-
-    def test_activity_level_based_on_poll_yes_count(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Test Node", group=group, timezone="UTC"
-        )
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=4,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 5
-
-    def test_activity_level_max_at_8_attendees(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Test Node", group=group, timezone="UTC"
-        )
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=10,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 10
-
-    def test_activity_level_averages_multiple_polls(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Test Node", group=group, timezone="UTC"
-        )
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        three_weeks_ago = timezone.now() - timedelta(weeks=3)
-
-        poll1 = Poll.objects.create(
-            telegram_id="poll1",
-            node=node,
-            question="Coming this week?",
-            yes_count=8,
-        )
-        Poll.objects.filter(pk=poll1.pk).update(created=two_weeks_ago)
-
-        poll2 = Poll.objects.create(
-            telegram_id="poll2",
-            node=node,
-            question="Coming this week?",
-            yes_count=4,
-        )
-        Poll.objects.filter(pk=poll2.pk).update(created=three_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 8
-
-    def test_activity_level_ignores_old_polls(self, client, db):
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Test Node", group=group, timezone="UTC"
-        )
-
-        six_weeks_ago = timezone.now() - timedelta(weeks=6)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=10,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=six_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 0
-
-    def test_activity_level_no_group(self, client, db):
-        node = Node.objects.create(name="No Group Node")
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 0
 
     def test_person_attending_true_for_recent_yes_vote(
         self, client, db, mock_attending_window
@@ -910,323 +812,6 @@ class TestApiNodes:
             assert data["nodes"][0]["attending_count"] == 0
             person_data = data["people"][0]
             assert person_data["nodes"][0]["attending"] is False
-
-    def test_disabled_node_has_no_activity_level(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Disabled Node",
-            group=group,
-            timezone="UTC",
-            disabled=True,
-        )
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=8,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        node_data = data["nodes"][0]
-        assert node_data["disabled"] is True
-        assert node_data["activity_level"] is None
-
-    def test_enabled_node_has_activity_level(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Active Node",
-            group=group,
-            timezone="UTC",
-            disabled=False,
-        )
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=8,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        node_data = data["nodes"][0]
-        assert node_data["disabled"] is False
-        assert node_data["activity_level"] == 10
-
-    def test_activity_level_blends_participation_rate(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Small Active Node", group=group, timezone="UTC"
-        )
-
-        for i in range(10):
-            person = Person.objects.create(telegram_id=i + 1)
-            GroupPerson.objects.create(group=group, person=person)
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=4,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 6
-
-    def test_activity_level_penalizes_low_participation(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Large Group",
-        )
-        node = Node.objects.create(
-            name="Large Less Active Node", group=group, timezone="UTC"
-        )
-
-        for i in range(100):
-            person = Person.objects.create(telegram_id=i + 1)
-            GroupPerson.objects.create(group=group, person=person)
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=8,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 6
-
-    def test_activity_level_rewards_high_participation(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Active Group",
-        )
-        node = Node.objects.create(
-            name="Active Node", group=group, timezone="UTC"
-        )
-
-        for i in range(20):
-            person = Person.objects.create(telegram_id=i + 1)
-            GroupPerson.objects.create(group=group, person=person)
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=10,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 10
-
-    def test_activity_level_excludes_left_members(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Test Node", group=group, timezone="UTC"
-        )
-
-        for i in range(10):
-            person = Person.objects.create(telegram_id=i + 1)
-            GroupPerson.objects.create(group=group, person=person)
-
-        for i in range(90):
-            person = Person.objects.create(telegram_id=i + 100)
-            GroupPerson.objects.create(group=group, person=person, left=True)
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=4,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 6
-
-    def test_activity_level_includes_chat_activity(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Active Chat Node", group=group, timezone="UTC"
-        )
-
-        for i in range(10):
-            person = Person.objects.create(telegram_id=i + 1)
-            GroupPerson.objects.create(group=group, person=person)
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=4,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        person = Person.objects.first()
-        for day_offset in range(14):
-            day = (timezone.now() - timedelta(days=day_offset + 7)).date()
-            ActivityDay.objects.create(
-                person=person,
-                group=group,
-                date=day,
-                message_count=15,
-            )
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 8
-
-    def test_activity_level_chat_without_members(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Chat Only Node", group=group, timezone="UTC"
-        )
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=4,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        person = Person.objects.create(telegram_id=999)
-        for day_offset in range(14):
-            day = (timezone.now() - timedelta(days=day_offset + 7)).date()
-            ActivityDay.objects.create(
-                person=person,
-                group=group,
-                date=day,
-                message_count=7,
-            )
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 6
-
-    def test_activity_level_chat_boosts_low_participation(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Large Group",
-        )
-        node = Node.objects.create(
-            name="Large Active Chat Node", group=group, timezone="UTC"
-        )
-
-        for i in range(100):
-            person = Person.objects.create(telegram_id=i + 1)
-            GroupPerson.objects.create(group=group, person=person)
-
-        two_weeks_ago = timezone.now() - timedelta(weeks=2)
-        poll = Poll.objects.create(
-            telegram_id="poll123",
-            node=node,
-            question="Coming this week?",
-            yes_count=8,
-        )
-        Poll.objects.filter(pk=poll.pk).update(created=two_weeks_ago)
-
-        person = Person.objects.first()
-        for day_offset in range(28):
-            day = (timezone.now() - timedelta(days=day_offset + 7)).date()
-            ActivityDay.objects.create(
-                person=person,
-                group=group,
-                date=day,
-                message_count=15,
-            )
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 7
-
-    def test_activity_level_weights_recent_polls_higher(self, client, db):
-        Node.objects.all().delete()
-        group = Group.objects.create(
-            telegram_id=-1001234567890,
-            display_name="Test Group",
-        )
-        node = Node.objects.create(
-            name="Trending Node", group=group, timezone="UTC"
-        )
-
-        one_week_ago = timezone.now() - timedelta(weeks=1, days=1)
-        poll1 = Poll.objects.create(
-            telegram_id="poll1",
-            node=node,
-            question="Coming this week?",
-            yes_count=8,
-        )
-        Poll.objects.filter(pk=poll1.pk).update(created=one_week_ago)
-
-        three_weeks_ago = timezone.now() - timedelta(weeks=3, days=1)
-        poll2 = Poll.objects.create(
-            telegram_id="poll2",
-            node=node,
-            question="Coming this week?",
-            yes_count=2,
-        )
-        Poll.objects.filter(pk=poll2.pk).update(created=three_weeks_ago)
-
-        response = client.get("/api/nodes/")
-
-        data = response.json()
-        assert data["nodes"][0]["activity_level"] == 8
 
     def test_stats_people_count_includes_all_users_in_node_groups(
         self, client, db
