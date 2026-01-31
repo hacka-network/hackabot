@@ -1,27 +1,20 @@
 import html
 import json
 import re
-import zoneinfo
 from datetime import datetime, timedelta, timezone
 
+from django.conf import settings
 from django.db.models import F, Q
 from django.http import HttpResponse, JsonResponse
+from django.utils import timezone as django_timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-
-BIO_MAX_LENGTH = 140
-
-
-def _sanitize_for_html(text):
-    if not text:
-        return text
-    return html.escape(text, quote=True)
-
 
 from .models import (
     ActivityDay,
     Group,
     GroupPerson,
+    MeetupPhoto,
     Node,
     Person,
     Poll,
@@ -29,11 +22,25 @@ from .models import (
 )
 from .telegram import (
     answer_callback_query,
-    export_chat_invite_link,
+    download_file,
+    is_chat_admin,
     send,
-    send_with_keyboard,
+    send_chat_action,
     verify_webhook_secret,
 )
+
+BIO_MAX_LENGTH = 140
+
+if settings.IS_PRODUCTION:
+    PHOTO_UPLOAD_CHAT_ID = -1002257954378
+else:
+    PHOTO_UPLOAD_CHAT_ID = -5117513714
+
+
+def _sanitize_for_html(text):
+    if not text:
+        return text
+    return html.escape(text, quote=True)
 
 
 def _get_or_create_person(user_data):
@@ -170,6 +177,24 @@ def _handle_message(message_data):
         print("📊 Found poll in message, processing...")
         _handle_poll_data(poll_data, group=group)
 
+    # Handle photo uploads in designated group
+    chat_id = message_data.get("chat", {}).get("id")
+    if chat_id == PHOTO_UPLOAD_CHAT_ID:
+        photos = message_data.get("photo", [])
+        caption = message_data.get("caption", "")
+        if photos and caption:
+            node = _find_node_from_hashtags(caption)
+            if node:
+                _handle_photo_upload(message_data, node, photos, chat_id)
+
+        text = message_data.get("text", "")
+        if text and text.strip().lower() == "delete":
+            _handle_delete_reply(message_data)
+
+        # Handle hashtag reply to photo (for adding hashtag after the fact)
+        if text:
+            _handle_hashtag_reply(message_data, chat_id)
+
 
 def _handle_poll_data(poll_data, group=None):
     print(
@@ -199,6 +224,124 @@ def _handle_poll_data(poll_data, group=None):
     )
     action = "created" if created else "updated"
     print(f"📊 Poll {action}: yes={yes_count}, no={no_count}")
+
+
+def _find_node_from_hashtags(text):
+    if not text:
+        return None
+    hashtags = re.findall(r"#(\w+)", text.lower())
+    if not hashtags:
+        return None
+    for node in Node.objects.filter(disabled=False):
+        node_name_lower = node.name.lower().replace(" ", "")
+        if node_name_lower in hashtags:
+            return node
+    return None
+
+
+def _escape_markdown(text):
+    for char in [
+        "_", "*", "[", "]", "(", ")", "~", "`", ">", "#",
+        "+", "-", "=", "|", "{", "}", ".", "!"
+    ]:
+        text = text.replace(char, f"\\{char}")
+    return text
+
+
+def _handle_photo_upload(message_data, node, photos, chat_id):
+    from .images import process_image
+
+    largest_photo = photos[-1]
+    file_id = largest_photo.get("file_id")
+    if not file_id:
+        send(chat_id, "Hmm, something went wrong with that photo. Try again?")
+        return
+
+    if MeetupPhoto.objects.filter(telegram_file_id=file_id).exists():
+        print(f"⏭️ Photo already exists: {file_id[:20]}...")
+        return
+
+    send_chat_action(chat_id, "typing")
+
+    user_data = message_data.get("from")
+    uploader = _get_or_create_person(user_data) if user_data else None
+
+    image_bytes = download_file(file_id)
+    if not image_bytes:
+        send(chat_id, "Couldn't download that photo. Try again?")
+        return
+
+    processed = process_image(image_bytes)
+    if not processed:
+        send(chat_id, "Couldn't process that image. Is it a valid photo?")
+        return
+
+    MeetupPhoto.objects.create(
+        node=node,
+        telegram_file_id=file_id,
+        image_data=processed,
+        uploaded_by=uploader,
+    )
+
+    node_name = _escape_markdown(node.name)
+    emoji = node.emoji or ""
+    send(chat_id, f"Thanks! Added your {emoji} {node_name} photo to hacka.network")
+    print(f"✅ Saved meetup photo for {node.name} ({len(processed)} bytes)")
+
+
+def _handle_delete_reply(message_data):
+    chat_id = message_data.get("chat", {}).get("id")
+    user_id = message_data.get("from", {}).get("id")
+    reply_to = message_data.get("reply_to_message")
+
+    if not reply_to:
+        return
+
+    photos = reply_to.get("photo", [])
+    if not photos:
+        return
+
+    if not is_chat_admin(chat_id, user_id):
+        send(chat_id, "Only group admins can remove photos from the website")
+        return
+
+    file_id = photos[-1].get("file_id")
+    photo = MeetupPhoto.objects.filter(telegram_file_id=file_id).first()
+
+    if photo:
+        node_name = _escape_markdown(photo.node.name)
+        emoji = photo.node.emoji or ""
+        photo.delete()
+        send(chat_id, f"Removed {emoji} {node_name} photo from hacka.network")
+    else:
+        send(chat_id, "That photo isn't on the website")
+
+
+def _handle_hashtag_reply(message_data, chat_id):
+    text = message_data.get("text", "")
+    reply_to = message_data.get("reply_to_message")
+
+    if not reply_to:
+        return
+
+    photos = reply_to.get("photo", [])
+    if not photos:
+        return
+
+    largest_photo = photos[-1]
+    file_id = largest_photo.get("file_id")
+    if not file_id:
+        return
+
+    if MeetupPhoto.objects.filter(telegram_file_id=file_id).exists():
+        print(f"⏭️ Photo already uploaded, ignoring hashtag reply")
+        return
+
+    node = _find_node_from_hashtags(text)
+    if not node:
+        return
+
+    _handle_photo_upload(reply_to, node, photos, chat_id)
 
 
 def _handle_poll_answer(poll_answer_data):
@@ -931,4 +1074,41 @@ def api_nodes(request):
     response = JsonResponse(
         dict(nodes=nodes_data, people=people_list, stats=stats)
     )
+    return _cors_response(response)
+
+
+def api_recent_photos(request):
+    if request.method == "OPTIONS":
+        return _cors_response(HttpResponse())
+    if request.method != "GET":
+        return HttpResponse(status=405)
+
+    two_weeks_ago = django_timezone.now() - timedelta(weeks=2)
+    photos = MeetupPhoto.objects.filter(
+        created__gte=two_weeks_ago
+    ).select_related("node")[:9]
+
+    photos_data = []
+    for photo in photos:
+        days_ago = (django_timezone.now() - photo.created).days
+        photos_data.append(dict(
+            id=photo.id,
+            node_name=photo.node.name,
+            node_emoji=photo.node.emoji,
+            days_ago=days_ago,
+        ))
+
+    return _cors_response(JsonResponse(dict(photos=photos_data)))
+
+
+def api_photo_image(request, photo_id):
+    if request.method != "GET":
+        return HttpResponse(status=405)
+
+    photo = MeetupPhoto.objects.filter(id=photo_id).first()
+    if not photo:
+        return HttpResponse(status=404)
+
+    response = HttpResponse(photo.image_data, content_type="image/jpeg")
+    response["Cache-Control"] = "public, max-age=86400"
     return _cors_response(response)

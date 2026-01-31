@@ -241,3 +241,28 @@ class ActivityDay(models.Model):
             date=self.date.isoformat(),
             message_count=self.message_count,
         )
+
+
+class MeetupPhoto(models.Model):
+    node = models.ForeignKey("Node", on_delete=models.CASCADE)
+    telegram_file_id = models.CharField(max_length=255, unique=True)
+    image_data = models.BinaryField()
+    uploaded_by = models.ForeignKey(
+        "Person", on_delete=models.SET_NULL, null=True, blank=True
+    )
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created"]
+
+    def __str__(self):
+        return f"Photo for {self.node.name} ({self.id})"
+
+    def to_dict(self):
+        return dict(
+            id=self.id,
+            node_id=self.node_id,
+            telegram_file_id=self.telegram_file_id,
+            uploaded_by_id=self.uploaded_by_id,
+            created=self.created.isoformat(),
+        )

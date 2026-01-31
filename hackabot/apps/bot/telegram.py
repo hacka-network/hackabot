@@ -271,6 +271,56 @@ def send_event_reminder(event):
     print(f"✅ Event reminder sent for {event.type}")
 
 
+def send_chat_action(chat_id, action="typing"):
+    token = _get_bot_token()
+    print(f"📤 Calling Telegram API: sendChatAction ({action}) to {chat_id}")
+    resp = requests.post(
+        f"{TELEGRAM_API_BASE}/{token}/sendChatAction",
+        json=dict(chat_id=chat_id, action=action),
+        timeout=REQUEST_TIMEOUT,
+    )
+    _raise_for_status(resp)
+    print(f"✅ Chat action '{action}' sent")
+
+
+def download_file(file_id):
+    token = _get_bot_token()
+    print(f"📤 Calling Telegram API: getFile for {file_id[:20]}...")
+    resp = requests.post(
+        f"{TELEGRAM_API_BASE}/{token}/getFile",
+        json=dict(file_id=file_id),
+        timeout=REQUEST_TIMEOUT,
+    )
+    _raise_for_status(resp)
+    result = resp.json()
+    file_path = result.get("result", {}).get("file_path")
+    if not file_path:
+        print("❌ No file_path in getFile response")
+        return None
+    print(f"📥 Downloading file: {file_path}")
+    file_url = f"{TELEGRAM_API_BASE}/file/{token}/{file_path}"
+    resp = requests.get(file_url, timeout=60)
+    _raise_for_status(resp)
+    print(f"✅ Downloaded {len(resp.content)} bytes")
+    return resp.content
+
+
+def is_chat_admin(chat_id, user_id):
+    token = _get_bot_token()
+    print(f"📤 Calling Telegram API: getChatMember for user {user_id}")
+    resp = requests.post(
+        f"{TELEGRAM_API_BASE}/{token}/getChatMember",
+        json=dict(chat_id=chat_id, user_id=user_id),
+        timeout=REQUEST_TIMEOUT,
+    )
+    _raise_for_status(resp)
+    result = resp.json().get("result", {})
+    status = result.get("status", "")
+    is_admin = status in ("administrator", "creator")
+    print(f"📥 User {user_id} status: {status} (admin={is_admin})")
+    return is_admin
+
+
 def send_weekly_attendance_summary():
     from datetime import timedelta
 

@@ -1,14 +1,18 @@
 from datetime import timedelta
 
+import base64
+
 from django.contrib import admin
 from django.db.models import Sum
 from django.utils import timezone
+from django.utils.html import format_html
 
 from .models import (
     ActivityDay,
     Event,
     Group,
     GroupPerson,
+    MeetupPhoto,
     Node,
     Person,
     Poll,
@@ -211,3 +215,39 @@ class ActivityDayAdmin(admin.ModelAdmin):
     ordering = ["-date", "-message_count"]
     raw_id_fields = ["group", "person"]
     date_hierarchy = "date"
+
+
+@admin.register(MeetupPhoto)
+class MeetupPhotoAdmin(admin.ModelAdmin):
+    list_display = ["id", "node", "preview_thumb", "uploaded_by", "size_kb", "created"]
+    list_filter = ["node"]
+    search_fields = ["node__name", "uploaded_by__first_name", "uploaded_by__username"]
+    ordering = ["-created"]
+    raw_id_fields = ["node", "uploaded_by"]
+    readonly_fields = ["telegram_file_id", "preview_large", "size_kb", "created"]
+
+    @admin.display(description="Preview")
+    def preview_thumb(self, obj):
+        if not obj.image_data:
+            return "-"
+        b64 = base64.b64encode(obj.image_data).decode("utf-8")
+        return format_html(
+            '<img src="data:image/jpeg;base64,{}" style="max-height: 50px;">',
+            b64,
+        )
+
+    @admin.display(description="Preview")
+    def preview_large(self, obj):
+        if not obj.image_data:
+            return "-"
+        b64 = base64.b64encode(obj.image_data).decode("utf-8")
+        return format_html(
+            '<img src="data:image/jpeg;base64,{}" style="max-width: 400px;">',
+            b64,
+        )
+
+    @admin.display(description="Size")
+    def size_kb(self, obj):
+        if not obj.image_data:
+            return "-"
+        return f"{len(obj.image_data) // 1024} KB"

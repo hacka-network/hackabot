@@ -22,6 +22,9 @@ REMINDER_MINUTES_BEFORE = 30
 SUMMARY_DAY = 4  # Friday
 SUMMARY_HOUR = 7
 SUMMARY_MINUTE = 0
+CLEANUP_HOUR = 0
+CLEANUP_MINUTE = 0
+MAX_PHOTOS = 100
 
 
 def should_send_poll(node, now_utc):
@@ -147,6 +150,33 @@ def process_weekly_summary():
             sentry_sdk.capture_exception(e)
 
 
+def should_cleanup_photos(now_utc):
+    if now_utc.hour != CLEANUP_HOUR:
+        return False
+    if now_utc.minute != CLEANUP_MINUTE:
+        return False
+    return True
+
+
+def process_photo_cleanup():
+    from hackabot.apps.bot.models import MeetupPhoto
+
+    now_utc = arrow.now(POLL_TIMEZONE)
+    if not should_cleanup_photos(now_utc):
+        return
+
+    total = MeetupPhoto.objects.count()
+    if total <= MAX_PHOTOS:
+        return
+
+    to_delete = total - MAX_PHOTOS
+    oldest_ids = MeetupPhoto.objects.order_by("created").values_list(
+        "id", flat=True
+    )[:to_delete]
+    deleted, _ = MeetupPhoto.objects.filter(id__in=list(oldest_ids)).delete()
+    print(f"🗑️ Cleaned up {deleted} old photos")
+
+
 def check_all_nodes():
     from hackabot.apps.bot.models import Node
 
@@ -159,6 +189,7 @@ def check_all_nodes():
         process_node_events(node)
 
     process_weekly_summary()
+    process_photo_cleanup()
 
 
 def run_worker():
