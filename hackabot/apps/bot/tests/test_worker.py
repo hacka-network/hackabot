@@ -24,7 +24,6 @@ from hackabot.apps.worker.run import (
     POLL_DAY,
     POLL_HOUR,
     POLL_MINUTE,
-    EVENT_DAY,
     SUMMARY_DAY,
     SUMMARY_HOUR,
     SUMMARY_MINUTE,

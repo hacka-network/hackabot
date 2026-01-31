@@ -108,6 +108,10 @@ class Node(models.Model):
     timezone = models.CharField(
         max_length=50, default="UTC", help_text="e.g. Europe/Paris"
     )
+    event_day = models.PositiveSmallIntegerField(
+        default=3,
+        help_text="Day of week for events (0=Monday, 4=Friday, etc.)",
+    )
     last_poll_sent_at = models.DateTimeField(null=True, blank=True)
     disabled = models.BooleanField(default=False)
 

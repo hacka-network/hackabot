@@ -17,14 +17,21 @@ POLL_DAY = 0  # Monday (0 = Monday in arrow weekday)
 POLL_HOUR = 7
 POLL_MINUTE = 0
 POLL_TIMEZONE = "UTC"  # All polls sent at 7am UTC (= 3pm Bali)
-EVENT_DAY = 3  # Thursday
 REMINDER_MINUTES_BEFORE = 30
+WEEKDAY_NAMES = [
+    "Monday", "Tuesday", "Wednesday", "Thursday",
+    "Friday", "Saturday", "Sunday",
+]
 SUMMARY_DAY = 4  # Friday
 SUMMARY_HOUR = 7
 SUMMARY_MINUTE = 0
 CLEANUP_HOUR = 0
 CLEANUP_MINUTE = 0
 MAX_PHOTOS = 100
+
+
+def get_event_day_name(node):
+    return WEEKDAY_NAMES[node.event_day]
 
 
 def should_send_poll(node, now_utc):
@@ -46,7 +53,7 @@ def should_send_poll(node, now_utc):
 
 
 def should_send_event_reminder(event, now_in_tz):
-    if now_in_tz.weekday() != EVENT_DAY:
+    if now_in_tz.weekday() != event.node.event_day:
         return False
 
     # Calculate reminder time (30 mins before event)
@@ -77,7 +84,7 @@ def process_node_poll(node):
     if should_send_poll(node, now_utc):
         print(f"📊 Time to send poll for {node.name}")
         try:
-            send_poll(node)
+            send_poll(node, when=get_event_day_name(node))
             node.last_poll_sent_at = timezone.now()
             node.save(update_fields=["last_poll_sent_at"])
             print(f"✅ Poll sent and timestamp updated for {node.name}")
