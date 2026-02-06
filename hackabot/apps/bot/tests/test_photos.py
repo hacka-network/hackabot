@@ -404,10 +404,10 @@ class TestPhotoUploadWebhook:
 
 
 class TestDeletePhotoCommand:
-    def test_admin_can_delete_photo(
+    def test_anyone_can_delete_photo(
         self, client, db, test_node, monkeypatch
     ):
-        photo = MeetupPhoto.objects.create(
+        MeetupPhoto.objects.create(
             node=test_node,
             telegram_file_id="photo123",
             image_data=b"test",
@@ -416,11 +416,9 @@ class TestDeletePhotoCommand:
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append((chat_id, text)),
-        )
-        monkeypatch.setattr(
-            "hackabot.apps.bot.views.is_chat_admin",
-            lambda chat_id, user_id: True,
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
@@ -433,14 +431,21 @@ class TestDeletePhotoCommand:
                 "update_id": 1001,
                 "message": {
                     "message_id": 2,
-                    "from": {"id": 12345, "first_name": "Admin"},
-                    "chat": {"id": -5117513714, "type": "supergroup"},
+                    "from": {"id": 99999, "first_name": "Regular"},
+                    "chat": {
+                        "id": -5117513714,
+                        "type": "supergroup",
+                    },
                     "date": 1704067200,
                     "text": "delete",
                     "reply_to_message": {
                         "message_id": 1,
                         "photo": [
-                            {"file_id": "photo123", "width": 640, "height": 480}
+                            {
+                                "file_id": "photo123",
+                                "width": 640,
+                                "height": 480,
+                            }
                         ],
                     },
                 },
@@ -452,64 +457,15 @@ class TestDeletePhotoCommand:
         assert len(sent_messages) == 1
         assert "Removed" in sent_messages[0][1]
 
-    def test_non_admin_cannot_delete_photo(
-        self, client, db, test_node, monkeypatch
-    ):
-        photo = MeetupPhoto.objects.create(
-            node=test_node,
-            telegram_file_id="photo123",
-            image_data=b"test",
-        )
-
-        sent_messages = []
-        monkeypatch.setattr(
-            "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append((chat_id, text)),
-        )
-        monkeypatch.setattr(
-            "hackabot.apps.bot.views.is_chat_admin",
-            lambda chat_id, user_id: False,
-        )
-        monkeypatch.setattr(
-            "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
-            -5117513714,
-        )
-
-        response = post_webhook(
-            client,
-            {
-                "update_id": 1001,
-                "message": {
-                    "message_id": 2,
-                    "from": {"id": 12345, "first_name": "User"},
-                    "chat": {"id": -5117513714, "type": "supergroup"},
-                    "date": 1704067200,
-                    "text": "delete",
-                    "reply_to_message": {
-                        "message_id": 1,
-                        "photo": [
-                            {"file_id": "photo123", "width": 640, "height": 480}
-                        ],
-                    },
-                },
-            },
-        )
-
-        assert response.status_code == 200
-        assert MeetupPhoto.objects.count() == 1
-        assert "Only group admins" in sent_messages[0][1]
-
     def test_delete_nonexistent_photo(
         self, client, db, test_node, monkeypatch
     ):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append((chat_id, text)),
-        )
-        monkeypatch.setattr(
-            "hackabot.apps.bot.views.is_chat_admin",
-            lambda chat_id, user_id: True,
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
@@ -522,14 +478,21 @@ class TestDeletePhotoCommand:
                 "update_id": 1001,
                 "message": {
                     "message_id": 2,
-                    "from": {"id": 12345, "first_name": "Admin"},
-                    "chat": {"id": -5117513714, "type": "supergroup"},
+                    "from": {"id": 12345, "first_name": "Alice"},
+                    "chat": {
+                        "id": -5117513714,
+                        "type": "supergroup",
+                    },
                     "date": 1704067200,
                     "text": "delete",
                     "reply_to_message": {
                         "message_id": 1,
                         "photo": [
-                            {"file_id": "notexist", "width": 640, "height": 480}
+                            {
+                                "file_id": "notexist",
+                                "width": 640,
+                                "height": 480,
+                            }
                         ],
                     },
                 },
@@ -681,6 +644,19 @@ class TestHelperFunctions:
         assert _find_node_from_hashtags("No hashtag here") is None
         assert _find_node_from_hashtags("") is None
         assert _find_node_from_hashtags(None) is None
+
+    def test_find_node_from_hashtags_fuzzy(self, db, test_node):
+        from hackabot.apps.bot.views import _find_node_from_hashtags
+
+        # Doubled letter
+        assert _find_node_from_hashtags("#hackattesstville") == test_node
+        # Missing letter
+        assert _find_node_from_hashtags("#hackatesville") == test_node
+        # Swapped letters
+        assert _find_node_from_hashtags("#hackatestvlile") == test_node
+        # Too different should not match
+        assert _find_node_from_hashtags("#hacka") is None
+        assert _find_node_from_hashtags("#completely") is None
 
     def test_escape_markdown(self):
         from hackabot.apps.bot.views import _escape_markdown

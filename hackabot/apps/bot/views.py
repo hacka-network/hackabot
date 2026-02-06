@@ -2,6 +2,7 @@ import html
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 
 from django.conf import settings
 from django.db.models import F, Q
@@ -24,7 +25,6 @@ from .telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
     answer_callback_query,
     download_file,
-    is_chat_admin,
     send,
     send_chat_action,
     verify_webhook_secret,
@@ -227,17 +227,36 @@ def _handle_poll_data(poll_data, group=None):
     print(f"📊 Poll {action}: yes={yes_count}, no={no_count}")
 
 
+FUZZY_MATCH_THRESHOLD = 0.85
+
+
 def _find_node_from_hashtags(text):
     if not text:
         return None
     hashtags = re.findall(r"#(\w+)", text.lower())
     if not hashtags:
         return None
-    for node in Node.objects.filter(disabled=False):
+
+    nodes = list(Node.objects.filter(disabled=False))
+
+    for node in nodes:
         node_name_lower = node.name.lower().replace(" ", "")
         if node_name_lower in hashtags:
             return node
-    return None
+
+    best_match = None
+    best_ratio = 0
+    for node in nodes:
+        node_name_lower = node.name.lower().replace(" ", "")
+        for hashtag in hashtags:
+            ratio = SequenceMatcher(
+                None, node_name_lower, hashtag
+            ).ratio()
+            if ratio >= FUZZY_MATCH_THRESHOLD and ratio > best_ratio:
+                best_ratio = ratio
+                best_match = node
+
+    return best_match
 
 
 def _escape_markdown(text):
@@ -292,7 +311,6 @@ def _handle_photo_upload(message_data, node, photos, chat_id):
 
 def _handle_delete_reply(message_data):
     chat_id = message_data.get("chat", {}).get("id")
-    user_id = message_data.get("from", {}).get("id")
     reply_to = message_data.get("reply_to_message")
 
     if not reply_to:
@@ -300,10 +318,6 @@ def _handle_delete_reply(message_data):
 
     photos = reply_to.get("photo", [])
     if not photos:
-        return
-
-    if not is_chat_admin(chat_id, user_id):
-        send(chat_id, "Only group admins can remove photos from the website")
         return
 
     file_id = photos[-1].get("file_id")
