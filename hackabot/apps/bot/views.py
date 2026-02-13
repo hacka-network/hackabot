@@ -4,6 +4,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 
+import arrow
+
 from django.conf import settings
 from django.db.models import F, Q
 from django.http import HttpResponse, JsonResponse
@@ -268,6 +270,12 @@ def _escape_markdown(text):
     return text
 
 
+def _get_event_date(upload_dt, event_day, tz="UTC"):
+    local_dt = arrow.get(upload_dt).to(tz)
+    days_back = (local_dt.weekday() - event_day) % 7
+    return local_dt.shift(days=-days_back).datetime
+
+
 def _handle_photo_upload(message_data, node, photos, chat_id):
     from .images import process_image
 
@@ -296,11 +304,15 @@ def _handle_photo_upload(message_data, node, photos, chat_id):
         send(chat_id, "Couldn't process that image. Is it a valid photo?")
         return
 
+    event_date = _get_event_date(
+        django_timezone.now(), node.event_day, node.timezone
+    )
     MeetupPhoto.objects.create(
         node=node,
         telegram_file_id=file_id,
         image_data=processed,
         uploaded_by=uploader,
+        created=event_date,
     )
 
     node_name = _escape_markdown(node.name)

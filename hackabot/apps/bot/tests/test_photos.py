@@ -1,12 +1,16 @@
 import io
 import json
+from datetime import datetime, timezone
 
+import arrow
 import pytest
+from django.core.management import call_command
 from django.test import Client
 from PIL import Image
 
 from hackabot.apps.bot.images import process_image
 from hackabot.apps.bot.models import Group, MeetupPhoto, Node, Person
+from hackabot.apps.bot.views import _get_event_date
 
 TEST_WEBHOOK_SECRET = "test-webhook-secret-123"
 
@@ -722,3 +726,86 @@ class TestPhotoCleanup:
         process_photo_cleanup()
 
         assert MeetupPhoto.objects.count() == 5
+
+
+class TestGetEventDate:
+    def test_same_day_no_shift(self):
+        # Thursday upload, Thursday event (day=3)
+        thu = datetime(2025, 2, 13, 14, 0, tzinfo=timezone.utc)
+        result = _get_event_date(thu, 3)
+        assert result.date() == thu.date()
+
+    def test_saturday_to_thursday(self):
+        # Saturday upload, Thursday event (day=3)
+        sat = datetime(2025, 2, 15, 10, 0, tzinfo=timezone.utc)
+        result = _get_event_date(sat, 3)
+        assert result.weekday() == 3
+        assert result.date() == datetime(2025, 2, 13).date()
+
+    def test_monday_to_previous_thursday(self):
+        # Monday upload, Thursday event (day=3)
+        mon = datetime(2025, 2, 17, 10, 0, tzinfo=timezone.utc)
+        result = _get_event_date(mon, 3)
+        assert result.weekday() == 3
+        assert result.date() == datetime(2025, 2, 13).date()
+
+    def test_preserves_time(self):
+        sat = datetime(2025, 2, 15, 18, 30, tzinfo=timezone.utc)
+        result = _get_event_date(sat, 3)
+        assert result.hour == 18
+        assert result.minute == 30
+
+    def test_timezone_aware_edge_case(self):
+        # Saturday 1am UTC = Friday 8pm in New York
+        # For a Friday event (day=4), should land on that
+        # same Friday in New York time
+        sat_utc = datetime(
+            2025, 2, 15, 1, 0, tzinfo=timezone.utc
+        )
+        result = _get_event_date(
+            sat_utc, 4, tz="America/New_York"
+        )
+        local = arrow.get(result).to("America/New_York")
+        assert local.weekday() == 4
+        assert local.date() == datetime(2025, 2, 14).date()
+
+
+class TestBackfillPhotoDateCommand:
+    def test_backfill_shifts_dates(self, db, test_node):
+        # Node event_day defaults to 3 (Thursday)
+        test_node.event_day = 3
+        test_node.save()
+
+        # Create photo with a Saturday timestamp
+        sat = datetime(2025, 2, 15, 12, 0, tzinfo=timezone.utc)
+        photo = MeetupPhoto.objects.create(
+            node=test_node,
+            telegram_file_id="backfill1",
+            image_data=b"test",
+            created=sat,
+        )
+
+        call_command("backfill_photo_dates")
+
+        photo.refresh_from_db()
+        assert photo.created.weekday() == 3
+        assert photo.created.date() == datetime(
+            2025, 2, 13
+        ).date()
+
+    def test_dry_run_does_not_modify(self, db, test_node):
+        test_node.event_day = 3
+        test_node.save()
+
+        sat = datetime(2025, 2, 15, 12, 0, tzinfo=timezone.utc)
+        photo = MeetupPhoto.objects.create(
+            node=test_node,
+            telegram_file_id="backfill2",
+            image_data=b"test",
+            created=sat,
+        )
+
+        call_command("backfill_photo_dates", dry_run=True)
+
+        photo.refresh_from_db()
+        assert photo.created == sat
