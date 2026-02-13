@@ -1110,12 +1110,11 @@ def api_recent_photos(request):
 
     photos_data = []
     for photo in photos:
-        days_ago = (django_timezone.now() - photo.created).days
         photos_data.append(dict(
             id=photo.id,
             node_name=photo.node.name,
             node_emoji=photo.node.emoji,
-            days_ago=days_ago,
+            created=photo.created.isoformat(),
         ))
 
     return _cors_response(JsonResponse(dict(photos=photos_data)))

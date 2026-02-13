@@ -530,6 +530,7 @@ class TestPhotoAPI:
         assert len(data["photos"]) == 2
         assert data["photos"][0]["node_name"] == "Hackatestville"
         assert data["photos"][0]["node_emoji"] == "🧪"
+        assert "created" in data["photos"][0]
 
     def test_api_recent_photos_limits_to_12(self, client, db, test_node):
         for i in range(20):

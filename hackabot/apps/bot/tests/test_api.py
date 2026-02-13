@@ -252,7 +252,7 @@ class TestApiNodes:
         assert people[0]["nodes"][0]["id"] == str(node.slug)
         assert people[0]["nodes"][0]["attending"] is False
 
-    def test_person_fields(self, client, db):
+    def test_person_fields(self, client, db, mock_attending_window):
         group = Group.objects.create(
             telegram_id=-1001234567890,
             display_name="Test Group",
@@ -271,6 +271,9 @@ class TestApiNodes:
             node=node,
             question="Coming?",
         )
+        old_date = mock_attending_window - timedelta(days=10)
+        poll.created = old_date
+        poll.save()
         PollAnswer.objects.create(poll=poll, person=person, yes=True)
 
         response = client.get("/api/nodes/")
