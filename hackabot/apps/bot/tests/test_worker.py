@@ -134,6 +134,24 @@ class TestShouldSendEventReminder:
         )
         assert should_send_event_reminder(event, thursday_9am) is True
 
+    def test_drinks_fires_at_event_time(self, node):
+        event = Event(
+            node=node, type="drinks", time=time(18, 0), where=""
+        )
+        thursday_6pm = arrow.Arrow(
+            2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
+        )
+        assert should_send_event_reminder(event, thursday_6pm) is True
+
+    def test_drinks_does_not_fire_30_mins_before(self, node):
+        event = Event(
+            node=node, type="drinks", time=time(18, 0), where=""
+        )
+        thursday_530pm = arrow.Arrow(
+            2024, 1, 11, 17, 30, 0, tzinfo="America/New_York"
+        )
+        assert should_send_event_reminder(event, thursday_530pm) is False
+
 
 class TestProcessNodePoll:
     @responses.activate
@@ -370,7 +388,7 @@ class TestEventReminderMessages:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
-            # Event at 6pm (18:00), reminder sent 30 mins before at 5:30pm
+            # Event at 6pm (18:00), drinks fire at event time
             event = Event.objects.create(
                 node=node, type="drinks", time=time(18, 0), where="Rooftop Bar"
             )
@@ -382,11 +400,11 @@ class TestEventReminderMessages:
                 status=200,
             )
 
-            thursday_530pm = arrow.Arrow(
-                2024, 1, 11, 17, 30, 0, tzinfo="America/New_York"
+            thursday_6pm = arrow.Arrow(
+                2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_530pm
+                mock_arrow.now.return_value = thursday_6pm
                 process_node_events(node)
 
             event.refresh_from_db()
@@ -402,7 +420,7 @@ class TestEventReminderMessages:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
-            # Event at 6:30pm (18:30), reminder sent 30 mins before at 6pm
+            # Event at 6:30pm (18:30), drinks fire at event time
             event = Event.objects.create(
                 node=node, type="drinks", time=time(18, 30), where=""
             )
@@ -414,11 +432,11 @@ class TestEventReminderMessages:
                 status=200,
             )
 
-            thursday_6pm = arrow.Arrow(
-                2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
+            thursday_630pm = arrow.Arrow(
+                2024, 1, 11, 18, 30, 0, tzinfo="America/New_York"
             )
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_6pm
+                mock_arrow.now.return_value = thursday_630pm
                 process_node_events(node)
 
             event.refresh_from_db()

@@ -53,17 +53,24 @@ def should_send_poll(node, now_utc):
 
 
 def should_send_event_reminder(event, now_in_tz):
+    from hackabot.apps.bot.models import Event
+
     if now_in_tz.weekday() != event.node.event_day:
         return False
 
-    # Calculate reminder time (30 mins before event)
     event_datetime = now_in_tz.replace(
         hour=event.time.hour,
         minute=event.time.minute,
         second=0,
         microsecond=0,
     )
-    reminder_datetime = event_datetime.shift(minutes=-REMINDER_MINUTES_BEFORE)
+
+    if event.type == Event.TYPE_DRINKS:
+        reminder_datetime = event_datetime
+    else:
+        reminder_datetime = event_datetime.shift(
+            minutes=-REMINDER_MINUTES_BEFORE
+        )
 
     if now_in_tz.hour != reminder_datetime.hour:
         return False
