@@ -75,3 +75,11 @@ When making changes to the codebase, keep the test suite up to date:
 - If you fix a bug, consider adding a test that would have caught it
 - Run the test suite before considering a task complete
 - Ensure coverage stays above the 70% threshold
+
+## Deploying
+
+Deploy to production with the `/deploy` skill, which pushes to Heroku:
+
+```bash
+git push heroku main
+```
