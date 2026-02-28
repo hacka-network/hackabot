@@ -8,6 +8,7 @@ from hackabot.apps.bot.models import (
     ActivityDay,
     Group,
     GroupPerson,
+    MeetupPhoto,
     Node,
     Person,
     Poll,
@@ -76,7 +77,7 @@ class TestApiNodes:
         assert len(data["nodes"]) == 1
 
         node_data = data["nodes"][0]
-        assert node_data["id"] == str(node.slug)
+        assert node_data["id"] == node.name_slug
         assert node_data["name"] == "Test Node"
         assert node_data["emoji"] == "🚀"
         assert node_data["url"] == "https://example.com"
@@ -141,7 +142,7 @@ class TestApiNodes:
         people = data["people"]
         assert len(people) == 1
         assert people[0]["display_name"] == "Public Person"
-        assert people[0]["nodes"][0]["id"] == str(node.slug)
+        assert people[0]["nodes"][0]["id"] == node.name_slug
 
     def test_people_must_have_display_name_or_username_x(self, client, db):
         group = Group.objects.create(
@@ -249,7 +250,7 @@ class TestApiNodes:
         people = data["people"]
         assert len(people) == 1
         assert people[0]["display_name"] == "Chatter"
-        assert people[0]["nodes"][0]["id"] == str(node.slug)
+        assert people[0]["nodes"][0]["id"] == node.name_slug
         assert people[0]["nodes"][0]["attending"] is False
 
     def test_person_fields(self, client, db, mock_attending_window):
@@ -284,7 +285,7 @@ class TestApiNodes:
         assert person_data["username_x"] == "alice_x"
         assert person_data["bio"] == "Building cool stuff"
         assert person_data["nodes"] == [
-            {"id": str(node.slug), "attending": False}
+            {"id": node.name_slug, "attending": False}
         ]
 
     def test_person_bio_excluded_when_empty(self, client, db):
@@ -542,8 +543,8 @@ class TestApiNodes:
         assert len(person_data["nodes"]) == 2
 
         node_map = {n["id"]: n["attending"] for n in person_data["nodes"]}
-        assert node_map[str(node1.slug)] is True
-        assert node_map[str(node2.slug)] is False
+        assert node_map[node1.name_slug] is True
+        assert node_map[node2.name_slug] is False
 
     def test_person_nodes_sorted_attending_first(
         self, client, db, mock_attending_window
@@ -589,7 +590,7 @@ class TestApiNodes:
         nodes = person_data["nodes"]
 
         assert nodes[0]["attending"] is True
-        assert nodes[0]["id"] == str(node2.slug)
+        assert nodes[0]["id"] == node2.name_slug
 
     def test_person_display_name_xss_sanitized(self, client, db):
         group = Group.objects.create(
@@ -878,7 +879,9 @@ class TestApiNodes:
         data = response.json()
         assert data["stats"]["people_count"] == 1
 
-    def test_stats_people_count_excludes_groups_without_nodes(self, client, db):
+    def test_stats_people_count_excludes_groups_without_nodes(
+        self, client, db
+    ):
         Node.objects.all().delete()
         node_group = Group.objects.create(
             telegram_id=-1001234567890,
@@ -952,3 +955,217 @@ class TestApiNodes:
 
         data = response.json()
         assert data["stats"]["people_count"] == 3
+
+
+class TestApiNodeDetail:
+    def test_returns_single_node(self, client, db):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(
+            name="Test Node",
+            emoji="🚀",
+            signup_url="https://example.com",
+            established=2020,
+            group=group,
+        )
+
+        response = client.get("/api/nodes/testnode/")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["node"]["id"] == "testnode"
+        assert data["node"]["name"] == "Test Node"
+        assert data["node"]["emoji"] == "🚀"
+
+    def test_404_for_invalid_slug(self, client, db):
+        response = client.get("/api/nodes/nonexistent/")
+
+        assert response.status_code == 404
+
+    def test_404_for_disabled_node(self, client, db):
+        Node.objects.all().delete()
+        Node.objects.create(name="Disabled", disabled=True)
+
+        response = client.get("/api/nodes/disabled/")
+
+        assert response.status_code == 404
+
+    def test_cors_headers(self, client, db):
+        Node.objects.all().delete()
+        Node.objects.create(name="TestNode")
+
+        response = client.get("/api/nodes/testnode/")
+
+        assert response["Access-Control-Allow-Origin"] == "*"
+
+    def test_cors_preflight(self, client, db):
+        response = client.options("/api/nodes/testnode/")
+
+        assert response.status_code == 200
+        assert response["Access-Control-Allow-Origin"] == "*"
+
+    def test_method_not_allowed(self, client, db):
+        response = client.post("/api/nodes/testnode/")
+
+        assert response.status_code == 405
+
+    def test_people_filtered_to_node(self, client, db):
+        Node.objects.all().delete()
+        group1 = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Group 1",
+        )
+        group2 = Group.objects.create(
+            telegram_id=-1001234567891,
+            display_name="Group 2",
+        )
+        node1 = Node.objects.create(name="Node One", group=group1)
+        node2 = Node.objects.create(name="Node Two", group=group2)
+
+        person1 = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+        person2 = Person.objects.create(
+            telegram_id=2,
+            first_name="Bob",
+            privacy=False,
+        )
+
+        poll1 = Poll.objects.create(
+            telegram_id="poll1",
+            node=node1,
+            question="Coming?",
+        )
+        poll2 = Poll.objects.create(
+            telegram_id="poll2",
+            node=node2,
+            question="Coming?",
+        )
+        PollAnswer.objects.create(poll=poll1, person=person1, yes=True)
+        PollAnswer.objects.create(poll=poll2, person=person2, yes=True)
+
+        response = client.get("/api/nodes/nodeone/")
+
+        data = response.json()
+        assert len(data["people"]) == 1
+        assert data["people"][0]["display_name"] == "Alice"
+
+    def test_stats_scoped_to_node(self, client, db):
+        Node.objects.all().delete()
+        group1 = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Group 1",
+        )
+        group2 = Group.objects.create(
+            telegram_id=-1001234567891,
+            display_name="Group 2",
+        )
+        node1 = Node.objects.create(name="Node One", group=group1)
+        Node.objects.create(name="Node Two", group=group2)
+
+        person1 = Person.objects.create(telegram_id=1)
+        person2 = Person.objects.create(telegram_id=2)
+        person3 = Person.objects.create(telegram_id=3)
+
+        GroupPerson.objects.create(group=group1, person=person1, left=False)
+        GroupPerson.objects.create(group=group2, person=person2, left=False)
+        GroupPerson.objects.create(group=group2, person=person3, left=False)
+
+        response = client.get("/api/nodes/nodeone/")
+
+        data = response.json()
+        assert data["stats"]["people_count"] == 1
+
+    def test_node_with_space_in_name(self, client, db):
+        Node.objects.all().delete()
+        Node.objects.create(name="Hacka Watu")
+
+        response = client.get("/api/nodes/hackawatu/")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["node"]["id"] == "hackawatu"
+        assert data["node"]["name"] == "Hacka Watu"
+
+
+class TestApiNodePhotos:
+    def test_returns_photos_for_node(self, client, db):
+        Node.objects.all().delete()
+        node = Node.objects.create(name="TestNode")
+        MeetupPhoto.objects.create(
+            node=node,
+            telegram_file_id="photo1",
+            image_data=b"test1",
+        )
+
+        response = client.get("/api/nodes/testnode/photos/")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["photos"]) == 1
+        assert data["photos"][0]["node_name"] == "TestNode"
+
+    def test_404_for_invalid_slug(self, client, db):
+        response = client.get("/api/nodes/nonexistent/photos/")
+
+        assert response.status_code == 404
+
+    def test_excludes_other_node_photos(self, client, db):
+        Node.objects.all().delete()
+        node1 = Node.objects.create(name="Node One")
+        node2 = Node.objects.create(name="Node Two")
+        MeetupPhoto.objects.create(
+            node=node1,
+            telegram_file_id="photo1",
+            image_data=b"test1",
+        )
+        MeetupPhoto.objects.create(
+            node=node2,
+            telegram_file_id="photo2",
+            image_data=b"test2",
+        )
+
+        response = client.get("/api/nodes/nodeone/photos/")
+
+        data = response.json()
+        assert len(data["photos"]) == 1
+        assert data["photos"][0]["node_name"] == "Node One"
+
+    def test_limits_to_12_photos(self, client, db):
+        Node.objects.all().delete()
+        node = Node.objects.create(name="TestNode")
+        for i in range(20):
+            MeetupPhoto.objects.create(
+                node=node,
+                telegram_file_id=f"photo{i}",
+                image_data=b"test",
+            )
+
+        response = client.get("/api/nodes/testnode/photos/")
+
+        data = response.json()
+        assert len(data["photos"]) == 12
+
+    def test_cors_headers(self, client, db):
+        Node.objects.all().delete()
+        Node.objects.create(name="TestNode")
+
+        response = client.get("/api/nodes/testnode/photos/")
+
+        assert response["Access-Control-Allow-Origin"] == "*"
+
+    def test_cors_preflight(self, client, db):
+        response = client.options("/api/nodes/testnode/photos/")
+
+        assert response.status_code == 200
+        assert response["Access-Control-Allow-Origin"] == "*"
+
+    def test_method_not_allowed(self, client, db):
+        response = client.post("/api/nodes/testnode/photos/")
+
+        assert response.status_code == 405

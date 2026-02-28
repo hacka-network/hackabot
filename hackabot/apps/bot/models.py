@@ -119,6 +119,10 @@ class Node(models.Model):
         help_text="Send global chat invite with weekly poll",
     )
 
+    @property
+    def name_slug(self):
+        return self.name.lower().replace(" ", "")
+
     def __str__(self):
         return f"{self.emoji} {self.name}" if self.emoji else self.name
 

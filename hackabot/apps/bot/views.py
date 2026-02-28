@@ -242,18 +242,15 @@ def _find_node_from_hashtags(text):
     nodes = list(Node.objects.filter(disabled=False))
 
     for node in nodes:
-        node_name_lower = node.name.lower().replace(" ", "")
-        if node_name_lower in hashtags:
+        if node.name_slug in hashtags:
             return node
 
     best_match = None
     best_ratio = 0
     for node in nodes:
-        node_name_lower = node.name.lower().replace(" ", "")
+        node_name_lower = node.name_slug
         for hashtag in hashtags:
-            ratio = SequenceMatcher(
-                None, node_name_lower, hashtag
-            ).ratio()
+            ratio = SequenceMatcher(None, node_name_lower, hashtag).ratio()
             if ratio >= FUZZY_MATCH_THRESHOLD and ratio > best_ratio:
                 best_ratio = ratio
                 best_match = node
@@ -263,8 +260,24 @@ def _find_node_from_hashtags(text):
 
 def _escape_markdown(text):
     for char in [
-        "_", "*", "[", "]", "(", ")", "~", "`", ">", "#",
-        "+", "-", "=", "|", "{", "}", ".", "!"
+        "_",
+        "*",
+        "[",
+        "]",
+        "(",
+        ")",
+        "~",
+        "`",
+        ">",
+        "#",
+        "+",
+        "-",
+        "=",
+        "|",
+        "{",
+        "}",
+        ".",
+        "!",
     ]:
         text = text.replace(char, f"\\{char}")
     return text
@@ -317,7 +330,10 @@ def _handle_photo_upload(message_data, node, photos, chat_id):
 
     node_name = _escape_markdown(node.name)
     emoji = node.emoji or ""
-    send(chat_id, f"Thanks! Added your {emoji} {node_name} photo to hacka.network")
+    send(
+        chat_id,
+        f"Thanks! Added your {emoji} {node_name} photo to hacka.network",
+    )
     print(f"✅ Saved meetup photo for {node.name} ({len(processed)} bytes)")
 
 
@@ -963,7 +979,7 @@ def api_nodes(request):
 
     for node in nodes:
         node_data = dict(
-            id=str(node.slug),
+            id=node.name_slug,
             name=node.name,
             emoji=node.emoji,
             url=node.signup_url,
@@ -997,14 +1013,11 @@ def api_nodes(request):
     }
 
     person_last_chatted_node = {}
-    group_memberships = (
-        GroupPerson.objects.filter(
-            left=False,
-            last_message_at__isnull=False,
-            group_id__in=groups_with_nodes.keys(),
-        )
-        .order_by("person_id", "-last_message_at")
-    )
+    group_memberships = GroupPerson.objects.filter(
+        left=False,
+        last_message_at__isnull=False,
+        group_id__in=groups_with_nodes.keys(),
+    ).order_by("person_id", "-last_message_at")
     for gp in group_memberships:
         if gp.person_id not in person_last_chatted_node:
             person_last_chatted_node[gp.person_id] = groups_with_nodes[
@@ -1044,7 +1057,7 @@ def api_nodes(request):
                     is_attending_any = True
                 person_nodes.append(
                     dict(
-                        id=str(node.slug),
+                        id=node.name_slug,
                         attending=attending,
                     )
                 )
@@ -1056,7 +1069,7 @@ def api_nodes(request):
                 if node:
                     person_nodes.append(
                         dict(
-                            id=str(node.slug),
+                            id=node.name_slug,
                             attending=False,
                         )
                     )
@@ -1086,7 +1099,9 @@ def api_nodes(request):
     people_list = [p[2] for p in people_data]
 
     node_group_ids = list(
-        Node.objects.filter(group__isnull=False).values_list("group_id", flat=True)
+        Node.objects.filter(group__isnull=False).values_list(
+            "group_id", flat=True
+        )
     )
     global_group = Group.objects.filter(
         telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID)
@@ -1109,6 +1124,147 @@ def api_nodes(request):
     return _cors_response(response)
 
 
+def _find_node_by_slug(node_slug):
+    for node in Node.objects.filter(disabled=False):
+        if node.name_slug == node_slug:
+            return node
+    return None
+
+
+def api_node_detail(request, node_slug):
+    if request.method == "OPTIONS":
+        return _cors_response(HttpResponse())
+    if request.method != "GET":
+        return HttpResponse(status=405)
+
+    node = _find_node_by_slug(node_slug)
+    if not node:
+        return _cors_response(HttpResponse(status=404))
+
+    node_data = dict(
+        id=node.name_slug,
+        name=node.name,
+        emoji=node.emoji,
+        url=node.signup_url,
+        established=node.established,
+        location=node.location,
+        timezone=node.timezone,
+        disabled=node.disabled,
+        attending_count=_get_this_weeks_attending_count(node),
+    )
+
+    node_attending_ids = _get_this_weeks_attending_person_ids(node)
+
+    person_attended_nodes = {}
+    poll_answers = PollAnswer.objects.filter(
+        yes=True,
+        poll__node=node,
+    ).select_related("poll__node")
+    for pa in poll_answers:
+        if pa.person_id not in person_attended_nodes:
+            person_attended_nodes[pa.person_id] = set()
+        person_attended_nodes[pa.person_id].add(pa.poll.node_id)
+
+    person_last_chatted_node = {}
+    if node.group_id:
+        group_memberships = GroupPerson.objects.filter(
+            left=False,
+            last_message_at__isnull=False,
+            group_id=node.group_id,
+        ).order_by("person_id", "-last_message_at")
+        for gp in group_memberships:
+            if gp.person_id not in person_last_chatted_node:
+                person_last_chatted_node[gp.person_id] = node.id
+
+    candidate_person_ids = set(person_attended_nodes.keys()) | set(
+        person_last_chatted_node.keys()
+    )
+    people = (
+        Person.objects.filter(
+            id__in=candidate_person_ids,
+            privacy=False,
+        )
+        .filter(Q(first_name__gt="") | Q(username_x__gt=""))
+        .distinct()
+    )
+
+    people_data = []
+    for person in people:
+        attended_node_ids = person_attended_nodes.get(person.id, set())
+        attending = person.id in node_attending_ids
+
+        if attended_node_ids:
+            if node.id not in attended_node_ids:
+                if person.id not in person_last_chatted_node:
+                    continue
+        else:
+            if person.id not in person_last_chatted_node:
+                continue
+
+        person_data = dict(
+            display_name=_sanitize_for_html(person.first_name),
+            username_x=(
+                _sanitize_for_html(person.username_x)
+                if person.username_x
+                else None
+            ),
+            nodes=[dict(id=node.name_slug, attending=attending)],
+        )
+        if person.bio:
+            person_data["bio"] = _sanitize_for_html(person.bio)
+
+        people_data.append((attending, person.first_name.lower(), person_data))
+
+    people_data.sort(key=lambda x: (not x[0], x[1]))
+    people_list = [p[2] for p in people_data]
+
+    node_group_ids = [node.group_id] if node.group_id else []
+    people_count = (
+        Person.objects.filter(
+            groupperson__group_id__in=node_group_ids,
+            groupperson__left=False,
+        )
+        .distinct()
+        .count()
+    )
+    stats = dict(people_count=people_count)
+
+    response = JsonResponse(
+        dict(node=node_data, people=people_list, stats=stats)
+    )
+    return _cors_response(response)
+
+
+def api_node_photos(request, node_slug):
+    if request.method == "OPTIONS":
+        return _cors_response(HttpResponse())
+    if request.method != "GET":
+        return HttpResponse(status=405)
+
+    node = _find_node_by_slug(node_slug)
+    if not node:
+        return _cors_response(HttpResponse(status=404))
+
+    two_weeks_ago = django_timezone.now() - timedelta(weeks=2)
+    photos = MeetupPhoto.objects.filter(
+        node=node,
+        created__gte=two_weeks_ago,
+    ).select_related("node")[:12]
+
+    photos_data = []
+    for photo in photos:
+        photos_data.append(
+            dict(
+                id=photo.id,
+                node_name=photo.node.name,
+                node_emoji=photo.node.emoji,
+                created=photo.created.isoformat(),
+            )
+        )
+
+    return _cors_response(JsonResponse(dict(photos=photos_data)))
+
+
 def api_recent_photos(request):
     if request.method == "OPTIONS":
         return _cors_response(HttpResponse())
@@ -1122,12 +1278,14 @@ def api_recent_photos(request):
 
     photos_data = []
     for photo in photos:
-        photos_data.append(dict(
-            id=photo.id,
-            node_name=photo.node.name,
-            node_emoji=photo.node.emoji,
-            created=photo.created.isoformat(),
-        ))
+        photos_data.append(
+            dict(
+                id=photo.id,
+                node_name=photo.node.name,
+                node_emoji=photo.node.emoji,
+                created=photo.created.isoformat(),
+            )
+        )
 
     return _cors_response(JsonResponse(dict(photos=photos_data)))
 
