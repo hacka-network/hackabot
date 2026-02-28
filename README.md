@@ -7,9 +7,8 @@
 Base URL: `https://bot.hacka.network`
 
 - `GET /api/nodes/` — all nodes, public people, and global stats
-- `GET /api/nodes/<node_slug>/` — single node, its people, and node stats
+- `GET /api/nodes/<node_slug>/` — single node, its people, node stats, and recent photos
 - `GET /api/photos/` — recent photos from all nodes (last 2 weeks, max 12)
-- `GET /api/nodes/<node_slug>/photos/` — recent photos for a single node
 - `GET /api/photos/<id>/image` — raw JPEG image for a photo
 
 The `node_slug` is the node name lowercased with spaces removed (e.g.

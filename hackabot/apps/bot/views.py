@@ -1229,40 +1229,31 @@ def api_node_detail(request, node_slug):
     )
     stats = dict(people_count=people_count)
 
-    response = JsonResponse(
-        dict(node=node_data, people=people_list, stats=stats)
-    )
-    return _cors_response(response)
-
-
-def api_node_photos(request, node_slug):
-    if request.method == "OPTIONS":
-        return _cors_response(HttpResponse())
-    if request.method != "GET":
-        return HttpResponse(status=405)
-
-    node = _find_node_by_slug(node_slug)
-    if not node:
-        return _cors_response(HttpResponse(status=404))
-
     two_weeks_ago = django_timezone.now() - timedelta(weeks=2)
     photos = MeetupPhoto.objects.filter(
         node=node,
         created__gte=two_weeks_ago,
-    ).select_related("node")[:12]
-
+    )[:12]
     photos_data = []
     for photo in photos:
         photos_data.append(
             dict(
                 id=photo.id,
-                node_name=photo.node.name,
-                node_emoji=photo.node.emoji,
+                node_name=node.name,
+                node_emoji=node.emoji,
                 created=photo.created.isoformat(),
             )
         )
 
-    return _cors_response(JsonResponse(dict(photos=photos_data)))
+    response = JsonResponse(
+        dict(
+            node=node_data,
+            people=people_list,
+            stats=stats,
+            photos=photos_data,
+        )
+    )
+    return _cors_response(response)
 
 
 def api_recent_photos(request):

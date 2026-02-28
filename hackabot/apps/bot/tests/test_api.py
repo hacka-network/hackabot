@@ -1092,9 +1092,7 @@ class TestApiNodeDetail:
         assert data["node"]["id"] == "hackawatu"
         assert data["node"]["name"] == "Hacka Watu"
 
-
-class TestApiNodePhotos:
-    def test_returns_photos_for_node(self, client, db):
+    def test_includes_photos_for_node(self, client, db):
         Node.objects.all().delete()
         node = Node.objects.create(name="TestNode")
         MeetupPhoto.objects.create(
@@ -1103,19 +1101,13 @@ class TestApiNodePhotos:
             image_data=b"test1",
         )
 
-        response = client.get("/api/nodes/testnode/photos/")
+        response = client.get("/api/nodes/testnode/")
 
-        assert response.status_code == 200
         data = response.json()
         assert len(data["photos"]) == 1
         assert data["photos"][0]["node_name"] == "TestNode"
 
-    def test_404_for_invalid_slug(self, client, db):
-        response = client.get("/api/nodes/nonexistent/photos/")
-
-        assert response.status_code == 404
-
-    def test_excludes_other_node_photos(self, client, db):
+    def test_photos_excludes_other_nodes(self, client, db):
         Node.objects.all().delete()
         node1 = Node.objects.create(name="Node One")
         node2 = Node.objects.create(name="Node Two")
@@ -1130,13 +1122,13 @@ class TestApiNodePhotos:
             image_data=b"test2",
         )
 
-        response = client.get("/api/nodes/nodeone/photos/")
+        response = client.get("/api/nodes/nodeone/")
 
         data = response.json()
         assert len(data["photos"]) == 1
         assert data["photos"][0]["node_name"] == "Node One"
 
-    def test_limits_to_12_photos(self, client, db):
+    def test_photos_limits_to_12(self, client, db):
         Node.objects.all().delete()
         node = Node.objects.create(name="TestNode")
         for i in range(20):
@@ -1146,26 +1138,7 @@ class TestApiNodePhotos:
                 image_data=b"test",
             )
 
-        response = client.get("/api/nodes/testnode/photos/")
+        response = client.get("/api/nodes/testnode/")
 
         data = response.json()
         assert len(data["photos"]) == 12
-
-    def test_cors_headers(self, client, db):
-        Node.objects.all().delete()
-        Node.objects.create(name="TestNode")
-
-        response = client.get("/api/nodes/testnode/photos/")
-
-        assert response["Access-Control-Allow-Origin"] == "*"
-
-    def test_cors_preflight(self, client, db):
-        response = client.options("/api/nodes/testnode/photos/")
-
-        assert response.status_code == 200
-        assert response["Access-Control-Allow-Origin"] == "*"
-
-    def test_method_not_allowed(self, client, db):
-        response = client.post("/api/nodes/testnode/photos/")
-
-        assert response.status_code == 405
