@@ -957,6 +957,42 @@ def _get_this_weeks_attending_count(node):
     ).count()
 
 
+def _get_last_attending_window():
+    now = datetime.now(timezone.utc)
+
+    days_since_monday = now.weekday()
+    monday_7am = now.replace(
+        hour=7, minute=0, second=0, microsecond=0
+    ) - timedelta(days=days_since_monday)
+
+    if now < monday_7am:
+        monday_7am = monday_7am - timedelta(weeks=1)
+
+    friday_7am = monday_7am + timedelta(days=4)
+
+    if now >= friday_7am:
+        # Past Friday: most recent completed window is this week's
+        return monday_7am
+    else:
+        # In current window: last completed window is previous week
+        return monday_7am - timedelta(weeks=1)
+
+
+def _get_last_attending_count(node):
+    if not node.group:
+        return 0
+
+    window_start = _get_last_attending_window()
+    window_end = window_start + timedelta(weeks=1)
+
+    return PollAnswer.objects.filter(
+        poll__node=node,
+        poll__created__gte=window_start,
+        poll__created__lt=window_end,
+        yes=True,
+    ).count()
+
+
 def _cors_response(response):
     response["Access-Control-Allow-Origin"] = "*"
     response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
@@ -1151,6 +1187,7 @@ def api_node_detail(request, node_slug):
         timezone=node.timezone,
         disabled=node.disabled,
         attending_count=_get_this_weeks_attending_count(node),
+        last_attending_count=_get_last_attending_count(node),
     )
 
     node_attending_ids = _get_this_weeks_attending_person_ids(node)

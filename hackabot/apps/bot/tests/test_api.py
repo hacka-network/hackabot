@@ -1142,3 +1142,141 @@ class TestApiNodeDetail:
 
         data = response.json()
         assert len(data["photos"]) == 12
+
+    def test_last_attending_count_from_previous_week(
+        self, client, db, mock_attending_window
+    ):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="TestNode", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+
+        # Poll from last week (before current window's Monday)
+        last_week_poll = Poll.objects.create(
+            telegram_id="poll_last",
+            node=node,
+            question="Coming last week?",
+        )
+        last_mon = mock_attending_window - timedelta(days=7)
+        last_mon = last_mon.replace(hour=7, minute=0)
+        Poll.objects.filter(pk=last_week_poll.pk).update(
+            created=last_mon
+        )
+        PollAnswer.objects.create(
+            poll=last_week_poll, person=person, yes=True
+        )
+
+        response = client.get("/api/nodes/testnode/")
+
+        data = response.json()
+        assert data["node"]["last_attending_count"] == 1
+
+    def test_last_attending_count_zero_with_no_previous_polls(
+        self, client, db, mock_attending_window
+    ):
+        Node.objects.all().delete()
+        node = Node.objects.create(name="TestNode")
+
+        response = client.get("/api/nodes/testnode/")
+
+        data = response.json()
+        assert data["node"]["last_attending_count"] == 0
+
+    def test_last_attending_count_excludes_current_week(
+        self, client, db, mock_attending_window
+    ):
+        Node.objects.all().delete()
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Test Group",
+        )
+        node = Node.objects.create(name="TestNode", group=group)
+
+        person = Person.objects.create(
+            telegram_id=1,
+            first_name="Alice",
+            privacy=False,
+        )
+
+        # Poll from this week's Monday
+        current_poll = Poll.objects.create(
+            telegram_id="poll_current",
+            node=node,
+            question="Coming this week?",
+        )
+        mon_7am = mock_attending_window.replace(day=5, hour=7, minute=0)
+        Poll.objects.filter(pk=current_poll.pk).update(
+            created=mon_7am
+        )
+        PollAnswer.objects.create(
+            poll=current_poll, person=person, yes=True
+        )
+
+        response = client.get("/api/nodes/testnode/")
+
+        data = response.json()
+        assert data["node"]["last_attending_count"] == 0
+
+    def test_last_attending_count_not_in_nodes_list(
+        self, client, db
+    ):
+        Node.objects.all().delete()
+        Node.objects.create(name="TestNode")
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        assert "last_attending_count" not in data["nodes"][0]
+
+    def test_last_attending_count_after_friday(self, client, db):
+        sat_10am_utc = datetime(
+            2026, 1, 10, 10, 0, 0, tzinfo=dt_timezone.utc
+        )
+        with patch("hackabot.apps.bot.views.datetime") as mock_dt:
+            mock_dt.now.return_value = sat_10am_utc
+            mock_dt.fromtimestamp = datetime.fromtimestamp
+
+            group = Group.objects.create(
+                telegram_id=-1001234567890,
+                display_name="Test Group",
+            )
+            node = Node.objects.create(
+                name="TestNode", group=group
+            )
+
+            person = Person.objects.create(
+                telegram_id=1,
+                first_name="Alice",
+                privacy=False,
+            )
+
+            # Poll from that same week's Monday
+            mon_7am = sat_10am_utc.replace(
+                day=5, hour=7, minute=0
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll123",
+                node=node,
+                question="Coming?",
+            )
+            Poll.objects.filter(pk=poll.pk).update(
+                created=mon_7am
+            )
+            PollAnswer.objects.create(
+                poll=poll, person=person, yes=True
+            )
+
+            response = client.get("/api/nodes/testnode/")
+
+            data = response.json()
+            # After Friday, this week's count becomes last
+            assert data["node"]["last_attending_count"] == 1
+            assert data["node"]["attending_count"] == 0
