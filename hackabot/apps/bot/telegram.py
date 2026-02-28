@@ -175,7 +175,7 @@ def export_chat_invite_link(chat_id):
     return result.get("result")
 
 
-def send_poll(node, when="Thursday"):
+def send_poll(node, when="Thursday", send_invite=True):
     from .models import Poll
 
     chat_id = node.group.telegram_id
@@ -217,14 +217,19 @@ def send_poll(node, when="Thursday"):
         )
         print("✅ Poll saved to database")
 
-    # Send an invite to the global group
-    print("📤 Sending global chat invite message...")
-    hacka_network_global_invite_url = "https://t.me/+XTK6oIHCVZFkNmY1"
-    send(
-        chat_id,
-        "...you can also join the [Hacka* global chat 🌏💻🤓]"
-        f"({hacka_network_global_invite_url})",
-    )
+    if send_invite:
+        print("📤 Sending global chat invite message...")
+        hacka_network_global_invite_url = (
+            "https://t.me/+XTK6oIHCVZFkNmY1"
+        )
+        send(
+            chat_id,
+            "...you can also join the "
+            "[Hacka* global chat 🌏💻🤓]"
+            f"({hacka_network_global_invite_url})",
+        )
+    else:
+        print("⏭️ Skipping global chat invite message")
 
     # Try to pin it
     try:

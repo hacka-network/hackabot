@@ -21,6 +21,7 @@ from hackabot.apps.bot.telegram import (
     TELEGRAM_API_BASE,
 )
 from hackabot.apps.worker.run import (
+    INVITE_GRACE_PERIOD_DAYS,
     POLL_DAY,
     POLL_HOUR,
     POLL_MINUTE,
@@ -32,6 +33,7 @@ from hackabot.apps.worker.run import (
     process_node_poll,
     process_weekly_summary,
     should_send_event_reminder,
+    should_send_global_invite,
     should_send_poll,
     should_send_weekly_summary,
 )
@@ -618,6 +620,9 @@ class TestDynamicNodeHandling:
                 name="New Node",
                 timezone="America/New_York",
             )
+            Node.objects.filter(pk=new_node.pk).update(
+                created=timezone.now() - timedelta(days=90)
+            )
 
             with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
                 mock_arrow.now.return_value = monday_7am_utc
@@ -1025,3 +1030,182 @@ class TestWeeklySummaryMessage:
             assert "Biggest yapper" in request_body
             assert "Charlie" in request_body
             assert "25 messages" in request_body
+
+
+class TestShouldSendGlobalInvite:
+    def test_returns_true_for_old_node_with_invite_enabled(self, node):
+        node.send_global_invite = True
+        node.created = timezone.now() - timedelta(days=90)
+        node.save()
+        assert should_send_global_invite(node) is True
+
+    def test_returns_false_for_new_node(self, node):
+        node.send_global_invite = True
+        node.created = timezone.now() - timedelta(days=30)
+        node.save()
+        assert should_send_global_invite(node) is False
+
+    def test_returns_false_when_invite_disabled(self, node):
+        node.send_global_invite = False
+        node.created = timezone.now() - timedelta(days=90)
+        node.save()
+        assert should_send_global_invite(node) is False
+
+    def test_returns_false_for_node_exactly_at_grace_period(self, node):
+        node.send_global_invite = True
+        node.created = timezone.now() - timedelta(days=59)
+        node.save()
+        assert should_send_global_invite(node) is False
+
+    def test_returns_true_for_node_past_grace_period(self, node):
+        node.send_global_invite = True
+        node.created = timezone.now() - timedelta(days=60)
+        node.save()
+        assert should_send_global_invite(node) is True
+
+
+class TestPollGlobalInvite:
+    @responses.activate
+    def test_sends_invite_for_old_node(self, node):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node.send_global_invite = True
+            node.created = timezone.now() - timedelta(days=90)
+            node.save()
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendPoll",
+                json={
+                    "ok": True,
+                    "result": {
+                        "message_id": 1002,
+                        "poll": {
+                            "id": "poll_123",
+                            "question": "Test?",
+                        },
+                    },
+                },
+                status=200,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={
+                    "ok": True,
+                    "result": {"message_id": 1003},
+                },
+                status=200,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/pinChatMessage",
+                json={"ok": True, "result": True},
+                status=200,
+            )
+
+            monday_7am_utc = arrow.Arrow(
+                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
+            )
+            with patch(
+                "hackabot.apps.worker.run.arrow"
+            ) as mock_arrow:
+                mock_arrow.now.return_value = monday_7am_utc
+                process_node_poll(node)
+
+            assert len(responses.calls) == 3
+            invite_body = responses.calls[1].request.body.decode()
+            assert "global chat" in invite_body
+
+    @responses.activate
+    def test_skips_invite_for_new_node(self, node):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node.send_global_invite = True
+            node.created = timezone.now() - timedelta(days=30)
+            node.save()
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendPoll",
+                json={
+                    "ok": True,
+                    "result": {
+                        "message_id": 1002,
+                        "poll": {
+                            "id": "poll_123",
+                            "question": "Test?",
+                        },
+                    },
+                },
+                status=200,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/pinChatMessage",
+                json={"ok": True, "result": True},
+                status=200,
+            )
+
+            monday_7am_utc = arrow.Arrow(
+                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
+            )
+            with patch(
+                "hackabot.apps.worker.run.arrow"
+            ) as mock_arrow:
+                mock_arrow.now.return_value = monday_7am_utc
+                process_node_poll(node)
+
+            # sendPoll + pinChatMessage, no sendMessage for invite
+            assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_skips_invite_when_disabled(self, node):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node.send_global_invite = False
+            node.created = timezone.now() - timedelta(days=90)
+            node.save()
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendPoll",
+                json={
+                    "ok": True,
+                    "result": {
+                        "message_id": 1002,
+                        "poll": {
+                            "id": "poll_123",
+                            "question": "Test?",
+                        },
+                    },
+                },
+                status=200,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/pinChatMessage",
+                json={"ok": True, "result": True},
+                status=200,
+            )
+
+            monday_7am_utc = arrow.Arrow(
+                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
+            )
+            with patch(
+                "hackabot.apps.worker.run.arrow"
+            ) as mock_arrow:
+                mock_arrow.now.return_value = monday_7am_utc
+                process_node_poll(node)
+
+            # sendPoll + pinChatMessage, no sendMessage for invite
+            assert len(responses.calls) == 2

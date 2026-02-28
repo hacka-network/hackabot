@@ -2,8 +2,6 @@
 
 ## General rules
 
-- NEVER create or run database migrations for me, I will do that myself manually.
-- But you should go ahead and add/modify fields etc on Django models.
 - NEVER try to install libraries or packages for me (e.g. pip install, brew install etc) just tell me that I need to do it
 - Don't add useless comments saying what you changed, comments should be useful and add information (err on the side of not adding any comments at all)
 - NEVER add docstrings to classes or functions

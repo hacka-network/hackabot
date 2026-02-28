@@ -1,5 +1,7 @@
 import pytest
-from datetime import time
+from datetime import time, timedelta
+
+from django.utils import timezone
 
 from hackabot.apps.bot.models import (
     Group,
@@ -20,7 +22,7 @@ def group(db):
 
 @pytest.fixture
 def node(db, group):
-    return Node.objects.create(
+    node = Node.objects.create(
         group=group,
         name="Test Node",
         emoji="🚀",
@@ -28,6 +30,11 @@ def node(db, group):
         timezone="America/New_York",
         established=2023,
     )
+    Node.objects.filter(pk=node.pk).update(
+        created=timezone.now() - timedelta(days=90)
+    )
+    node.refresh_from_db()
+    return node
 
 
 @pytest.fixture

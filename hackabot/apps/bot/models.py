@@ -114,6 +114,10 @@ class Node(models.Model):
     )
     last_poll_sent_at = models.DateTimeField(null=True, blank=True)
     disabled = models.BooleanField(default=False)
+    send_global_invite = models.BooleanField(
+        default=True,
+        help_text="Send global chat invite with weekly poll",
+    )
 
     def __str__(self):
         return f"{self.emoji} {self.name}" if self.emoji else self.name

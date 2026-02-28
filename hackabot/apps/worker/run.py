@@ -18,6 +18,7 @@ POLL_HOUR = 7
 POLL_MINUTE = 0
 POLL_TIMEZONE = "UTC"  # All polls sent at 7am UTC (= 3pm Bali)
 REMINDER_MINUTES_BEFORE = 30
+INVITE_GRACE_PERIOD_DAYS = 60
 WEEKDAY_NAMES = [
     "Monday", "Tuesday", "Wednesday", "Thursday",
     "Friday", "Saturday", "Sunday",
@@ -86,12 +87,26 @@ def should_send_event_reminder(event, now_in_tz):
     return True
 
 
+def should_send_global_invite(node):
+    if not node.send_global_invite:
+        return False
+    age_days = (timezone.now() - node.created).days
+    if age_days < INVITE_GRACE_PERIOD_DAYS:
+        return False
+    return True
+
+
 def process_node_poll(node):
     now_utc = arrow.now(POLL_TIMEZONE)
     if should_send_poll(node, now_utc):
         print(f"📊 Time to send poll for {node.name}")
         try:
-            send_poll(node, when=get_event_day_name(node))
+            send_invite = should_send_global_invite(node)
+            send_poll(
+                node,
+                when=get_event_day_name(node),
+                send_invite=send_invite,
+            )
             node.last_poll_sent_at = timezone.now()
             node.save(update_fields=["last_poll_sent_at"])
             print(f"✅ Poll sent and timestamp updated for {node.name}")
