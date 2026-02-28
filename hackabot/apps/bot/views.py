@@ -1229,11 +1229,7 @@ def api_node_detail(request, node_slug):
     )
     stats = dict(people_count=people_count)
 
-    two_weeks_ago = django_timezone.now() - timedelta(weeks=2)
-    photos = MeetupPhoto.objects.filter(
-        node=node,
-        created__gte=two_weeks_ago,
-    )[:12]
+    photos = MeetupPhoto.objects.filter(node=node)[:12]
     photos_data = []
     for photo in photos:
         photos_data.append(
