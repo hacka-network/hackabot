@@ -1258,10 +1258,7 @@ def api_recent_photos(request):
     if request.method != "GET":
         return HttpResponse(status=405)
 
-    two_weeks_ago = django_timezone.now() - timedelta(weeks=2)
-    photos = MeetupPhoto.objects.filter(
-        created__gte=two_weeks_ago
-    ).select_related("node")[:12]
+    photos = MeetupPhoto.objects.all().select_related("node")[:12]
 
     photos_data = []
     for photo in photos:
