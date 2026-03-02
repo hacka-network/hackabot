@@ -15,7 +15,6 @@ from hackabot.apps.bot.telegram import (
 
 POLL_DAY = 0  # Monday (0 = Monday in arrow weekday)
 POLL_HOUR = 7
-POLL_MINUTE = 0
 POLL_TIMEZONE = "UTC"  # All polls sent at 7am UTC (= 3pm Bali)
 REMINDER_MINUTES_BEFORE = 30
 INVITE_GRACE_PERIOD_DAYS = 60
@@ -25,9 +24,7 @@ WEEKDAY_NAMES = [
 ]
 SUMMARY_DAY = 4  # Friday
 SUMMARY_HOUR = 7
-SUMMARY_MINUTE = 0
 CLEANUP_HOUR = 0
-CLEANUP_MINUTE = 0
 MAX_PHOTOS = 100
 
 
@@ -40,9 +37,6 @@ def should_send_poll(node, now_utc):
         return False
 
     if now_utc.hour != POLL_HOUR:
-        return False
-
-    if now_utc.minute != POLL_MINUTE:
         return False
 
     if node.last_poll_sent_at:
@@ -96,8 +90,7 @@ def should_send_global_invite(node):
     return True
 
 
-def process_node_poll(node):
-    now_utc = arrow.now(POLL_TIMEZONE)
+def process_node_poll(node, now_utc):
     if should_send_poll(node, now_utc):
         print(f"📊 Time to send poll for {node.name}")
         try:
@@ -115,10 +108,10 @@ def process_node_poll(node):
             sentry_sdk.capture_exception(e)
 
 
-def process_node_events(node):
+def process_node_events(node, now_utc):
     from hackabot.apps.bot.models import Event
 
-    now_in_tz = arrow.now(node.timezone or "UTC")
+    now_in_tz = now_utc.to(node.timezone or "UTC")
     events = Event.objects.filter(node=node)
 
     for event in events:
@@ -141,9 +134,6 @@ def should_send_weekly_summary(global_group, now_utc):
     if now_utc.hour != SUMMARY_HOUR:
         return False
 
-    if now_utc.minute != SUMMARY_MINUTE:
-        return False
-
     if global_group.last_weekly_summary_sent_at:
         days_since = (
             timezone.now() - global_group.last_weekly_summary_sent_at
@@ -154,10 +144,8 @@ def should_send_weekly_summary(global_group, now_utc):
     return True
 
 
-def process_weekly_summary():
+def process_weekly_summary(now_utc):
     from hackabot.apps.bot.models import Group
-
-    now_utc = arrow.now(POLL_TIMEZONE)
 
     try:
         global_group = Group.objects.get(
@@ -182,15 +170,12 @@ def process_weekly_summary():
 def should_cleanup_photos(now_utc):
     if now_utc.hour != CLEANUP_HOUR:
         return False
-    if now_utc.minute != CLEANUP_MINUTE:
-        return False
     return True
 
 
-def process_photo_cleanup():
+def process_photo_cleanup(now_utc):
     from hackabot.apps.bot.models import MeetupPhoto
 
-    now_utc = arrow.now(POLL_TIMEZONE)
     if not should_cleanup_photos(now_utc):
         return
 
@@ -209,16 +194,18 @@ def process_photo_cleanup():
 def check_all_nodes():
     from hackabot.apps.bot.models import Node
 
+    now_utc = arrow.now(POLL_TIMEZONE)
+
     nodes = Node.objects.filter(
         group__isnull=False, disabled=False
     ).select_related("group")
 
     for node in nodes:
-        process_node_poll(node)
-        process_node_events(node)
+        process_node_poll(node, now_utc)
+        process_node_events(node, now_utc)
 
-    process_weekly_summary()
-    process_photo_cleanup()
+    process_weekly_summary(now_utc)
+    process_photo_cleanup(now_utc)
 
 
 def run_worker():

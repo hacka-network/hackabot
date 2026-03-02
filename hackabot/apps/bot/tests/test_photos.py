@@ -694,7 +694,7 @@ class TestPhotoCleanup:
 
         assert MeetupPhoto.objects.count() == 5
 
-        process_photo_cleanup()
+        process_photo_cleanup(arrow.now("UTC"))
 
         assert MeetupPhoto.objects.count() == 3
         remaining_ids = list(
@@ -723,7 +723,7 @@ class TestPhotoCleanup:
                 image_data=b"test",
             )
 
-        process_photo_cleanup()
+        process_photo_cleanup(arrow.now("UTC"))
 
         assert MeetupPhoto.objects.count() == 5
 

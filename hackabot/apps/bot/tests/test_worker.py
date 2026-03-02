@@ -24,10 +24,8 @@ from hackabot.apps.worker.run import (
     INVITE_GRACE_PERIOD_DAYS,
     POLL_DAY,
     POLL_HOUR,
-    POLL_MINUTE,
     SUMMARY_DAY,
     SUMMARY_HOUR,
-    SUMMARY_MINUTE,
     check_all_nodes,
     process_node_events,
     process_node_poll,
@@ -52,9 +50,9 @@ class TestShouldSendPoll:
         monday_8am_utc = arrow.Arrow(2024, 1, 8, 8, 0, 0, tzinfo="UTC")
         assert should_send_poll(node, monday_8am_utc) is False
 
-    def test_returns_false_on_wrong_minute(self, node):
+    def test_returns_true_at_any_minute_in_poll_hour(self, node):
         monday_7_30am_utc = arrow.Arrow(2024, 1, 8, 7, 30, 0, tzinfo="UTC")
-        assert should_send_poll(node, monday_7_30am_utc) is False
+        assert should_send_poll(node, monday_7_30am_utc) is True
 
     def test_returns_false_if_poll_sent_recently(self, node):
         node.last_poll_sent_at = timezone.now() - timedelta(days=3)
@@ -189,9 +187,7 @@ class TestProcessNodePoll:
             )
 
             monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = monday_7am_utc
-                process_node_poll(node)
+            process_node_poll(node, monday_7am_utc)
 
             node.refresh_from_db()
             assert node.last_poll_sent_at is not None
@@ -200,9 +196,7 @@ class TestProcessNodePoll:
     @responses.activate
     def test_does_not_send_poll_on_wrong_day(self, node):
         tuesday_7am_utc = arrow.Arrow(2024, 1, 9, 7, 0, 0, tzinfo="UTC")
-        with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-            mock_arrow.now.return_value = tuesday_7am_utc
-            process_node_poll(node)
+        process_node_poll(node, tuesday_7am_utc)
 
         node.refresh_from_db()
         assert node.last_poll_sent_at is None
@@ -229,9 +223,7 @@ class TestProcessNodeEvents:
             thursday_9am = arrow.Arrow(
                 2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_9am
-                process_node_events(node)
+            process_node_events(node, thursday_9am)
 
             intros_event.refresh_from_db()
             assert intros_event.last_reminder_sent_at is not None
@@ -242,9 +234,7 @@ class TestProcessNodeEvents:
         wednesday = arrow.Arrow(
             2024, 1, 10, 9, 0, 0, tzinfo="America/New_York"
         )
-        with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-            mock_arrow.now.return_value = wednesday
-            process_node_events(node)
+        process_node_events(node, wednesday)
 
         for event in events:
             event.refresh_from_db()
@@ -275,9 +265,7 @@ class TestEventReminderMessages:
             thursday_9am = arrow.Arrow(
                 2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_9am
-                process_node_events(node)
+            process_node_events(node, thursday_9am)
 
             event.refresh_from_db()
             assert event.last_reminder_sent_at is not None
@@ -307,9 +295,7 @@ class TestEventReminderMessages:
             thursday_330pm = arrow.Arrow(
                 2024, 1, 11, 15, 30, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_330pm
-                process_node_events(node)
+            process_node_events(node, thursday_330pm)
 
             event.refresh_from_db()
             assert event.last_reminder_sent_at is not None
@@ -339,9 +325,7 @@ class TestEventReminderMessages:
             thursday_1130am = arrow.Arrow(
                 2024, 1, 11, 11, 30, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_1130am
-                process_node_events(node)
+            process_node_events(node, thursday_1130am)
 
             event.refresh_from_db()
             assert event.last_reminder_sent_at is not None
@@ -372,9 +356,7 @@ class TestEventReminderMessages:
             thursday_noon = arrow.Arrow(
                 2024, 1, 11, 12, 0, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_noon
-                process_node_events(node)
+            process_node_events(node, thursday_noon)
 
             event.refresh_from_db()
             assert event.last_reminder_sent_at is not None
@@ -405,9 +387,7 @@ class TestEventReminderMessages:
             thursday_6pm = arrow.Arrow(
                 2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_6pm
-                process_node_events(node)
+            process_node_events(node, thursday_6pm)
 
             event.refresh_from_db()
             assert event.last_reminder_sent_at is not None
@@ -437,9 +417,7 @@ class TestEventReminderMessages:
             thursday_630pm = arrow.Arrow(
                 2024, 1, 11, 18, 30, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_630pm
-                process_node_events(node)
+            process_node_events(node, thursday_630pm)
 
             event.refresh_from_db()
             assert event.last_reminder_sent_at is not None
@@ -530,13 +508,11 @@ class TestErrorHandling:
             )
 
             monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = monday_7am_utc
-                with patch(
-                    "hackabot.apps.worker.run.sentry_sdk"
-                ) as mock_sentry:
-                    process_node_poll(node)
-                    assert mock_sentry.capture_exception.called
+            with patch(
+                "hackabot.apps.worker.run.sentry_sdk"
+            ) as mock_sentry:
+                process_node_poll(node, monday_7am_utc)
+                assert mock_sentry.capture_exception.called
 
             node.refresh_from_db()
             assert node.last_poll_sent_at is None
@@ -562,13 +538,11 @@ class TestErrorHandling:
             thursday_9am = arrow.Arrow(
                 2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
             )
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = thursday_9am
-                with patch(
-                    "hackabot.apps.worker.run.sentry_sdk"
-                ) as mock_sentry:
-                    process_node_events(node)
-                    assert mock_sentry.capture_exception.called
+            with patch(
+                "hackabot.apps.worker.run.sentry_sdk"
+            ) as mock_sentry:
+                process_node_events(node, thursday_9am)
+                assert mock_sentry.capture_exception.called
 
             intros_event.refresh_from_db()
             assert intros_event.last_reminder_sent_at is None
@@ -694,11 +668,13 @@ class TestShouldSendWeeklySummary:
             should_send_weekly_summary(global_group, friday_8am_utc) is False
         )
 
-    def test_returns_false_on_wrong_minute(self, global_group):
+    def test_returns_true_at_any_minute_in_summary_hour(
+        self, global_group
+    ):
         friday_7_30am_utc = arrow.Arrow(2024, 1, 12, 7, 30, 0, tzinfo="UTC")
         assert (
             should_send_weekly_summary(global_group, friday_7_30am_utc)
-            is False
+            is True
         )
 
     def test_returns_false_if_summary_sent_recently(self, global_group):
@@ -768,9 +744,7 @@ class TestProcessWeeklySummary:
             )
 
             friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = friday_7am_utc
-                process_weekly_summary()
+            process_weekly_summary(friday_7am_utc)
 
             global_group.refresh_from_db()
             assert global_group.last_weekly_summary_sent_at is not None
@@ -779,9 +753,7 @@ class TestProcessWeeklySummary:
     @responses.activate
     def test_does_not_send_summary_on_wrong_day(self, global_group):
         thursday_7am_utc = arrow.Arrow(2024, 1, 11, 7, 0, 0, tzinfo="UTC")
-        with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-            mock_arrow.now.return_value = thursday_7am_utc
-            process_weekly_summary()
+        process_weekly_summary(thursday_7am_utc)
 
         global_group.refresh_from_db()
         assert global_group.last_weekly_summary_sent_at is None
@@ -790,9 +762,7 @@ class TestProcessWeeklySummary:
     @responses.activate
     def test_does_not_send_if_global_group_missing(self, db):
         friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-        with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-            mock_arrow.now.return_value = friday_7am_utc
-            process_weekly_summary()
+        process_weekly_summary(friday_7am_utc)
 
         assert len(responses.calls) == 0
 
@@ -844,9 +814,7 @@ class TestWeeklySummaryMessage:
             )
 
             friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = friday_7am_utc
-                process_weekly_summary()
+            process_weekly_summary(friday_7am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -861,9 +829,7 @@ class TestWeeklySummaryMessage:
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
             friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = friday_7am_utc
-                process_weekly_summary()
+            process_weekly_summary(friday_7am_utc)
 
             global_group.refresh_from_db()
             assert global_group.last_weekly_summary_sent_at is None
@@ -906,9 +872,7 @@ class TestWeeklySummaryMessage:
             )
 
             friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = friday_7am_utc
-                process_weekly_summary()
+            process_weekly_summary(friday_7am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -968,9 +932,7 @@ class TestWeeklySummaryMessage:
             )
 
             friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = friday_7am_utc
-                process_weekly_summary()
+            process_weekly_summary(friday_7am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -1021,9 +983,7 @@ class TestWeeklySummaryMessage:
             )
 
             friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            with patch("hackabot.apps.worker.run.arrow") as mock_arrow:
-                mock_arrow.now.return_value = friday_7am_utc
-                process_weekly_summary()
+            process_weekly_summary(friday_7am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -1110,11 +1070,7 @@ class TestPollGlobalInvite:
             monday_7am_utc = arrow.Arrow(
                 2024, 1, 8, 7, 0, 0, tzinfo="UTC"
             )
-            with patch(
-                "hackabot.apps.worker.run.arrow"
-            ) as mock_arrow:
-                mock_arrow.now.return_value = monday_7am_utc
-                process_node_poll(node)
+            process_node_poll(node, monday_7am_utc)
 
             assert len(responses.calls) == 3
             invite_body = responses.calls[1].request.body.decode()
@@ -1156,11 +1112,7 @@ class TestPollGlobalInvite:
             monday_7am_utc = arrow.Arrow(
                 2024, 1, 8, 7, 0, 0, tzinfo="UTC"
             )
-            with patch(
-                "hackabot.apps.worker.run.arrow"
-            ) as mock_arrow:
-                mock_arrow.now.return_value = monday_7am_utc
-                process_node_poll(node)
+            process_node_poll(node, monday_7am_utc)
 
             # sendPoll + pinChatMessage, no sendMessage for invite
             assert len(responses.calls) == 2
@@ -1201,11 +1153,7 @@ class TestPollGlobalInvite:
             monday_7am_utc = arrow.Arrow(
                 2024, 1, 8, 7, 0, 0, tzinfo="UTC"
             )
-            with patch(
-                "hackabot.apps.worker.run.arrow"
-            ) as mock_arrow:
-                mock_arrow.now.return_value = monday_7am_utc
-                process_node_poll(node)
+            process_node_poll(node, monday_7am_utc)
 
             # sendPoll + pinChatMessage, no sendMessage for invite
             assert len(responses.calls) == 2
