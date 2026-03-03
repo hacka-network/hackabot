@@ -133,7 +133,12 @@ if IS_PRODUCTION:
 
 # Sentry
 SENTRY_DSN = os.environ.get("SENTRY_DSN")
-if SENTRY_DSN:
+is_shell = len(sys.argv) > 1 and sys.argv[1] in (
+    "shell",
+    "shell_plus",
+)
+
+if SENTRY_DSN and not is_shell:
     sentry_sdk.init(
         environment="production" if IS_PRODUCTION else "dev",
         dsn=SENTRY_DSN,
