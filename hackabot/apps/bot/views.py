@@ -27,6 +27,8 @@ from .telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
     answer_callback_query,
     download_file,
+    is_chat_admin,
+    restrict_chat_member,
     send,
     send_chat_action,
     verify_webhook_secret,
@@ -174,12 +176,14 @@ def _handle_message(message_data):
                     message_count=F("message_count") + 1
                 )
 
-    # Handle /rules command in global chat
+    # Handle /rules and /timeout commands in global chat
     chat_id = message_data.get("chat", {}).get("id")
     text = message_data.get("text", "")
     if str(chat_id) == HACKA_NETWORK_GLOBAL_CHAT_ID:
         if "/rules" in text:
             _handle_rules_command(chat_id)
+        if text.startswith("/timeout "):
+            _handle_timeout_command(chat_id, message_data)
 
     # Handle poll in message (when bot sends a poll)
     poll_data = message_data.get("poll")
@@ -211,6 +215,46 @@ def _handle_rules_command(chat_id):
         " avoid getting restricted for 24h or *gasp* even"
         " kicked: https://github.com/hacka-network/"
         "hacka.network/blob/main/chat-rules.md",
+    )
+
+
+def _handle_timeout_command(chat_id, message_data):
+    sender_id = message_data.get("from", {}).get("id")
+    if not sender_id:
+        return
+
+    if not is_chat_admin(chat_id, sender_id):
+        send(chat_id, "⛔ Only admins can use /timeout.")
+        return
+
+    text = message_data.get("text", "")
+    parts = text.split()
+    if len(parts) < 2:
+        send(chat_id, "⛔ Usage: /timeout @username")
+        return
+
+    raw_username = parts[1].lstrip("@")
+    person = Person.objects.filter(username=raw_username).first()
+    if not person:
+        send(
+            chat_id,
+            f"⛔ Could not find @{raw_username} in this chat.",
+        )
+        return
+
+    until = int(
+        (datetime.now(timezone.utc) + timedelta(hours=24))
+        .timestamp()
+    )
+    restrict_chat_member(chat_id, person.telegram_id, until)
+
+    escaped = raw_username.replace("_", "\\_")
+    send(
+        chat_id,
+        f"🔇 @{escaped} has been restricted for 24 hours."
+        " Please read the rules: https://github.com/"
+        "hacka-network/hacka.network/blob/main/"
+        "chat-rules.md",
     )
 
 

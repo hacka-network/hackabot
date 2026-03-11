@@ -326,6 +326,39 @@ def is_chat_admin(chat_id, user_id):
     return is_admin
 
 
+def restrict_chat_member(chat_id, user_id, until_date):
+    print(
+        f"📤 Calling Telegram API: restrictChatMember "
+        f"user {user_id} until {until_date}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/restrictChatMember"
+    resp = requests.post(
+        url,
+        json=dict(
+            chat_id=chat_id,
+            user_id=user_id,
+            permissions=dict(
+                can_send_messages=False,
+                can_send_audios=False,
+                can_send_documents=False,
+                can_send_photos=False,
+                can_send_videos=False,
+                can_send_video_notes=False,
+                can_send_voice_notes=False,
+                can_send_polls=False,
+                can_send_other_messages=False,
+                can_add_web_page_previews=False,
+            ),
+            until_date=until_date,
+        ),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 restrictChatMember response: {resp.text}")
+    _raise_for_status(resp)
+    print("✅ User restricted successfully")
+
+
 def send_weekly_attendance_summary():
     from datetime import timedelta
 

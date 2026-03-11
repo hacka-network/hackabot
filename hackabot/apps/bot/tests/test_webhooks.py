@@ -2535,3 +2535,198 @@ class TestRulesCommand:
 
         assert response.status_code == 200
         assert len(sent_messages) == 0
+
+
+class TestTimeoutCommand:
+    GLOBAL_CHAT_ID = -1002257954378
+
+    def _make_group_message(
+        self, text, chat_id=-1001234567890, user_id=12345
+    ):
+        return {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "from": {
+                    "id": user_id,
+                    "first_name": "Admin",
+                    "username": "admin_user",
+                    "is_bot": False,
+                },
+                "chat": {
+                    "id": chat_id,
+                    "type": "supergroup",
+                    "title": "Test Group",
+                },
+                "date": 1704067200,
+                "text": text,
+            },
+        }
+
+    def test_timeout_restricts_user(
+        self, client, db, monkeypatch
+    ):
+        Person.objects.create(
+            telegram_id=99999,
+            first_name="Bob",
+            username="bob123",
+        )
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+        restrictions = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.restrict_chat_member",
+            lambda cid, uid, until: restrictions.append(
+                (cid, uid, until)
+            ),
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/timeout @bob123",
+                chat_id=self.GLOBAL_CHAT_ID,
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(restrictions) == 1
+        assert restrictions[0][0] == self.GLOBAL_CHAT_ID
+        assert restrictions[0][1] == 99999
+        assert len(sent_messages) == 1
+        assert "restricted for 24 hours" in sent_messages[0][1]
+        assert "chat-rules.md" in sent_messages[0][1]
+
+    def test_timeout_without_at_sign(
+        self, client, db, monkeypatch
+    ):
+        Person.objects.create(
+            telegram_id=99999,
+            first_name="Bob",
+            username="bob123",
+        )
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+        restrictions = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.restrict_chat_member",
+            lambda cid, uid, until: restrictions.append(
+                (cid, uid, until)
+            ),
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/timeout bob123",
+                chat_id=self.GLOBAL_CHAT_ID,
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(restrictions) == 1
+        assert restrictions[0][1] == 99999
+
+    def test_timeout_non_admin_rejected(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: False,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/timeout @bob123",
+                chat_id=self.GLOBAL_CHAT_ID,
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "Only admins" in sent_messages[0][1]
+
+    def test_timeout_unknown_user(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/timeout @nobody999",
+                chat_id=self.GLOBAL_CHAT_ID,
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "Could not find" in sent_messages[0][1]
+
+    def test_timeout_ignored_in_other_chats(
+        self, client, db, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: None,
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+        restrictions = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.restrict_chat_member",
+            lambda cid, uid, until: restrictions.append(
+                (cid, uid, until)
+            ),
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/timeout @bob123",
+                chat_id=-1001234567890,
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(restrictions) == 0
