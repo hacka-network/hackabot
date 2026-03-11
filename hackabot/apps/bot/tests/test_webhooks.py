@@ -2442,3 +2442,96 @@ class TestNodesCommand:
         assert response.status_code == 200
         assert len(callback_answers) == 1
         assert callback_answers[0][1] is None
+
+
+class TestRulesCommand:
+    GLOBAL_CHAT_ID = -1002257954378
+
+    def _make_group_message(self, text, chat_id=-1001234567890):
+        return {
+            "update_id": 1001,
+            "message": {
+                "message_id": 1,
+                "from": {
+                    "id": 12345,
+                    "first_name": "Alice",
+                    "username": "alice123",
+                    "is_bot": False,
+                },
+                "chat": {
+                    "id": chat_id,
+                    "type": "supergroup",
+                    "title": "Test Group",
+                },
+                "date": 1704067200,
+                "text": text,
+            },
+        }
+
+    def test_rules_command_in_global_chat(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/rules", chat_id=self.GLOBAL_CHAT_ID
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert sent_messages[0][0] == self.GLOBAL_CHAT_ID
+        assert "rules/guidelines" in sent_messages[0][1]
+        assert "chat-rules.md" in sent_messages[0][1]
+
+    def test_rules_command_in_reply(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "hey read /rules please",
+                chat_id=self.GLOBAL_CHAT_ID,
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "rules/guidelines" in sent_messages[0][1]
+
+    def test_rules_command_ignored_in_other_chats(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/rules", chat_id=-1001234567890
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0

@@ -174,14 +174,18 @@ def _handle_message(message_data):
                     message_count=F("message_count") + 1
                 )
 
+    # Handle /rules command in global chat
+    chat_id = message_data.get("chat", {}).get("id")
+    text = message_data.get("text", "")
+    if str(chat_id) == HACKA_NETWORK_GLOBAL_CHAT_ID:
+        if "/rules" in text:
+            _handle_rules_command(chat_id)
+
     # Handle poll in message (when bot sends a poll)
     poll_data = message_data.get("poll")
     if poll_data:
         print("📊 Found poll in message, processing...")
         _handle_poll_data(poll_data, group=group)
-
-    # Handle photo uploads in designated group
-    chat_id = message_data.get("chat", {}).get("id")
     if chat_id == PHOTO_UPLOAD_CHAT_ID:
         photos = message_data.get("photo", [])
         caption = message_data.get("caption", "")
@@ -197,6 +201,17 @@ def _handle_message(message_data):
         # Handle hashtag reply to photo (for adding hashtag after the fact)
         if text:
             _handle_hashtag_reply(message_data, chat_id)
+
+
+def _handle_rules_command(chat_id):
+    send(
+        chat_id,
+        "ℹ️ Looks like someone is being annoying or something!"
+        " Please read the rules/guidelines for this chat to"
+        " avoid getting restricted for 24h or *gasp* even"
+        " kicked: https://github.com/hacka-network/"
+        "hacka.network/blob/main/chat-rules.md",
+    )
 
 
 def _handle_poll_data(poll_data, group=None):
