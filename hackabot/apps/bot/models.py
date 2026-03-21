@@ -188,6 +188,7 @@ class Event(models.Model):
 
 class Poll(models.Model):
     telegram_id = models.CharField(max_length=100, unique=True)
+    message_id = models.BigIntegerField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     node = models.ForeignKey(
         "Node", on_delete=models.CASCADE, null=True, blank=True

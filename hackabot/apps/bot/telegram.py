@@ -17,6 +17,7 @@ def _raise_for_status(resp):
             response=e.response,
         ) from e
 
+
 TESTING = "pytest" in sys.modules
 
 if TESTING:
@@ -210,6 +211,7 @@ def send_poll(node, when="Thursday", send_invite=True):
             telegram_id=poll_data["id"],
             defaults=dict(
                 node=node,
+                message_id=message_id,
                 question=poll_data.get("question", ""),
                 yes_count=0,
                 no_count=0,
@@ -219,9 +221,7 @@ def send_poll(node, when="Thursday", send_invite=True):
 
     if send_invite:
         print("📤 Sending global chat invite message...")
-        hacka_network_global_invite_url = (
-            "https://t.me/+XTK6oIHCVZFkNmY1"
-        )
+        hacka_network_global_invite_url = "https://t.me/+XTK6oIHCVZFkNmY1"
         send(
             chat_id,
             "...you can also join the "
@@ -230,6 +230,25 @@ def send_poll(node, when="Thursday", send_invite=True):
         )
     else:
         print("⏭️ Skipping global chat invite message")
+
+    # Unpin previous polls for this node
+    old_polls = Poll.objects.filter(
+        node=node, message_id__isnull=False
+    ).exclude(message_id=message_id)
+    for old_poll in old_polls:
+        try:
+            print(f"📤 Unpinning old poll (message {old_poll.message_id})")
+            resp = requests.post(
+                f"{TELEGRAM_API_BASE}/{token}/unpinChatMessage",
+                json=dict(
+                    chat_id=chat_id,
+                    message_id=old_poll.message_id,
+                ),
+                timeout=REQUEST_TIMEOUT,
+            )
+            print(f"📥 unpinChatMessage response: {resp.json()}")
+        except requests.RequestException as e:
+            print(f"⚠️ Failed to unpin old poll: {e}")
 
     # Try to pin it
     try:

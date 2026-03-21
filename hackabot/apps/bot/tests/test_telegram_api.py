@@ -36,6 +36,7 @@ class TestGetBotToken:
             token = _get_bot_token()
             assert token == "bot123456:ABC"
 
+
 class TestVerifyWebhook:
     @responses.activate
     def test_webhook_already_set(self):
@@ -286,6 +287,7 @@ class TestSendPoll:
 
             poll = Poll.objects.get(telegram_id="poll_new_123")
             assert poll.node == node
+            assert poll.message_id == 1002
             assert "Thursday" in poll.question
 
     @responses.activate
@@ -457,6 +459,87 @@ class TestSendPoll:
             send_poll(node)
 
             assert Poll.objects.filter(telegram_id="poll_123").exists()
+
+    @responses.activate
+    def test_send_poll_unpins_old_polls(self, db, node):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            Poll.objects.create(
+                telegram_id="old_poll_1",
+                node=node,
+                message_id=900,
+                question="Old poll 1",
+            )
+            Poll.objects.create(
+                telegram_id="old_poll_2",
+                node=node,
+                message_id=901,
+                question="Old poll 2",
+            )
+            # Poll without message_id should not be unpinned
+            Poll.objects.create(
+                telegram_id="old_poll_3",
+                node=node,
+                question="Old poll no msg id",
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendPoll",
+                json={
+                    "ok": True,
+                    "result": {
+                        "message_id": 1002,
+                        "poll": {
+                            "id": "new_poll",
+                            "question": "Test?",
+                        },
+                    },
+                },
+                status=200,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={
+                    "ok": True,
+                    "result": {"message_id": 1003},
+                },
+                status=200,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/unpinChatMessage",
+                json={"ok": True, "result": True},
+                status=200,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/pinChatMessage",
+                json={"ok": True, "result": True},
+                status=200,
+            )
+
+            send_poll(node)
+
+            import json
+
+            unpin_calls = [
+                c
+                for c in responses.calls
+                if "unpinChatMessage" in c.request.url
+            ]
+            assert len(unpin_calls) == 2
+            unpinned_ids = {
+                json.loads(c.request.body)["message_id"] for c in unpin_calls
+            }
+            assert unpinned_ids == {900, 901}
 
 
 class TestSendEventReminder:
