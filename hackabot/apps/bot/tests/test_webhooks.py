@@ -298,6 +298,10 @@ class TestWebhookJoinLeave:
                     "chat": {"id": -1001234567890, "type": "supergroup"},
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {"id": 12345, "first_name": "Alice"},
+                        "status": "left",
+                    },
                     "new_chat_member": {
                         "user": {"id": 12345, "first_name": "Alice"},
                         "status": "member",
@@ -325,6 +329,13 @@ class TestWebhookJoinLeave:
                     "chat": {"id": group.telegram_id, "type": "supergroup"},
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {
+                            "id": person.telegram_id,
+                            "first_name": person.first_name,
+                        },
+                        "status": "member",
+                    },
                     "new_chat_member": {
                         "user": {
                             "id": person.telegram_id,
@@ -352,6 +363,13 @@ class TestWebhookJoinLeave:
                     "chat": {"id": group.telegram_id, "type": "supergroup"},
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {
+                            "id": person.telegram_id,
+                            "first_name": person.first_name,
+                        },
+                        "status": "member",
+                    },
                     "new_chat_member": {
                         "user": {
                             "id": person.telegram_id,
@@ -381,6 +399,10 @@ class TestWebhookJoinLeave:
                     "chat": {"id": -1001234567890, "type": "supergroup"},
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {"id": 12345, "first_name": "NewAdmin"},
+                        "status": "left",
+                    },
                     "new_chat_member": {
                         "user": {"id": 12345, "first_name": "NewAdmin"},
                         "status": "administrator",
@@ -1233,6 +1255,14 @@ class TestOnboarding:
                     },
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {
+                            "id": 12345,
+                            "first_name": "Alice",
+                            "username": "alice",
+                        },
+                        "status": "left",
+                    },
                     "new_chat_member": {
                         "user": {
                             "id": 12345,
@@ -1291,6 +1321,14 @@ class TestOnboarding:
                     },
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {
+                            "id": 12345,
+                            "first_name": "Alice",
+                            "username": "alice",
+                        },
+                        "status": "left",
+                    },
                     "new_chat_member": {
                         "user": {
                             "id": 12345,
@@ -1415,6 +1453,10 @@ class TestOnboarding:
                     },
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {"id": 12345, "first_name": "Alice"},
+                        "status": "left",
+                    },
                     "new_chat_member": {
                         "user": {"id": 12345, "first_name": "Alice"},
                         "status": "member",
@@ -1450,12 +1492,68 @@ class TestOnboarding:
                     "chat": {"id": group.telegram_id, "type": "supergroup"},
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {
+                            "id": person.telegram_id,
+                            "first_name": person.first_name,
+                        },
+                        "status": "member",
+                    },
                     "new_chat_member": {
                         "user": {
                             "id": person.telegram_id,
                             "first_name": person.first_name,
                         },
                         "status": "left",
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+    def test_chat_member_tag_change_no_onboarding(
+        self, client, db, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+
+        person = Person.objects.create(
+            telegram_id=12345,
+            first_name="Jon",
+            onboarded=True,
+        )
+        group = Group.objects.create(
+            telegram_id=-1001234567890,
+            display_name="Hackatestville",
+        )
+        Node.objects.create(name="Test Node", group=group)
+        GroupPerson.objects.create(group=group, person=person, left=False)
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "chat_member": {
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "supergroup",
+                        "title": "Hackatestville",
+                    },
+                    "from": {"id": 11111, "first_name": "Admin"},
+                    "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {"id": 12345, "first_name": "Jon"},
+                        "status": "member",
+                    },
+                    "new_chat_member": {
+                        "user": {"id": 12345, "first_name": "Jon"},
+                        "status": "member",
+                        "tag": "founder",
                     },
                 },
             },
@@ -1497,6 +1595,10 @@ class TestOnboarding:
                     },
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {"id": 12345, "first_name": "Alice"},
+                        "status": "left",
+                    },
                     "new_chat_member": {
                         "user": {"id": 12345, "first_name": "Alice"},
                         "status": "member",
@@ -1536,6 +1638,10 @@ class TestOnboarding:
                     },
                     "from": {"id": 11111, "first_name": "Admin"},
                     "date": 1704067200,
+                    "old_chat_member": {
+                        "user": {"id": 12345},
+                        "status": "left",
+                    },
                     "new_chat_member": {
                         "user": {"id": 12345},
                         "status": "member",

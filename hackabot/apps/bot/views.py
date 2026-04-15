@@ -492,9 +492,11 @@ def _handle_chat_member(chat_member_data):
         return
 
     new_member = chat_member_data.get("new_chat_member", {})
+    old_member = chat_member_data.get("old_chat_member", {})
     user_data = new_member.get("user")
-    status = new_member.get("status")
-    print(f"👥 Member status change: {status}")
+    new_status = new_member.get("status")
+    old_status = old_member.get("status")
+    print(f"👥 Member status change: {old_status} → {new_status}")
 
     if not user_data:
         print("⚠️ No user_data in chat_member, skipping")
@@ -505,7 +507,8 @@ def _handle_chat_member(chat_member_data):
         print("⚠️ Could not get/create person, skipping")
         return
 
-    left = status in ("left", "kicked")
+    not_present = ("left", "kicked")
+    left = new_status in not_present
     GroupPerson.objects.update_or_create(
         group=group,
         person=person,
@@ -514,9 +517,14 @@ def _handle_chat_member(chat_member_data):
 
     if left:
         print(f"👋 {person.first_name} left/kicked from {group.display_name}")
-    else:
+    elif old_status in not_present:
         print(f"➡️ {person.first_name} joined {group.display_name}")
         _onboard_new_member(person, group)
+    else:
+        print(
+            f"🔄 {person.first_name} update: "
+            f"{old_status} → {new_status} (not a join)"
+        )
 
 
 def _handle_my_chat_member(my_chat_member_data):
