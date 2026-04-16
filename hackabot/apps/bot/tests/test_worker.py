@@ -27,6 +27,7 @@ from hackabot.apps.worker.run import (
     SUMMARY_DAY,
     SUMMARY_HOUR,
     check_all_nodes,
+    has_yes_responses_this_week,
     process_node_events,
     process_node_poll,
     process_weekly_summary,
@@ -205,7 +206,9 @@ class TestProcessNodePoll:
 
 class TestProcessNodeEvents:
     @responses.activate
-    def test_sends_reminder_and_updates_timestamp(self, node, events):
+    def test_sends_reminder_and_updates_timestamp(
+        self, node, events, poll_with_yes
+    ):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -241,10 +244,46 @@ class TestProcessNodeEvents:
             assert event.last_reminder_sent_at is None
         assert len(responses.calls) == 0
 
+    @responses.activate
+    def test_skips_reminders_when_no_yes_responses(
+        self, node, events
+    ):
+        Poll.objects.create(
+            telegram_id="poll_no_yes",
+            node=node,
+            question="Who's coming?",
+            yes_count=0,
+            no_count=5,
+        )
+
+        thursday_9am = arrow.Arrow(
+            2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
+        )
+        process_node_events(node, thursday_9am)
+
+        for event in events:
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is None
+        assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_skips_reminders_when_no_poll_exists(
+        self, node, events
+    ):
+        thursday_9am = arrow.Arrow(
+            2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
+        )
+        process_node_events(node, thursday_9am)
+
+        for event in events:
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is None
+        assert len(responses.calls) == 0
+
 
 class TestEventReminderMessages:
     @responses.activate
-    def test_intros_reminder_message(self, node, group):
+    def test_intros_reminder_message(self, node, group, poll_with_yes):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -274,7 +313,7 @@ class TestEventReminderMessages:
             assert "Intros are at 9:30am" in request_body
 
     @responses.activate
-    def test_demos_reminder_message(self, node, group):
+    def test_demos_reminder_message(self, node, group, poll_with_yes):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -304,7 +343,7 @@ class TestEventReminderMessages:
             assert "Demos are at 4pm" in request_body
 
     @responses.activate
-    def test_lunch_reminder_with_location(self, node, group):
+    def test_lunch_reminder_with_location(self, node, group, poll_with_yes):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -335,7 +374,7 @@ class TestEventReminderMessages:
             assert "Cafeteria" in request_body
 
     @responses.activate
-    def test_lunch_reminder_without_location(self, node, group):
+    def test_lunch_reminder_without_location(self, node, group, poll_with_yes):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -366,7 +405,7 @@ class TestEventReminderMessages:
             assert "in" not in request_body
 
     @responses.activate
-    def test_drinks_reminder_with_location(self, node, group):
+    def test_drinks_reminder_with_location(self, node, group, poll_with_yes):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -396,7 +435,7 @@ class TestEventReminderMessages:
             assert "Rooftop Bar" in request_body
 
     @responses.activate
-    def test_drinks_reminder_without_location(self, node, group):
+    def test_drinks_reminder_without_location(self, node, group, poll_with_yes):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -519,7 +558,7 @@ class TestErrorHandling:
 
     @responses.activate
     def test_event_reminder_error_does_not_update_timestamp(
-        self, node, events
+        self, node, events, poll_with_yes
     ):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram

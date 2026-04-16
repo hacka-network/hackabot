@@ -108,8 +108,25 @@ def process_node_poll(node, now_utc):
             sentry_sdk.capture_exception(e)
 
 
+def has_yes_responses_this_week(node):
+    from hackabot.apps.bot.models import Poll
+
+    poll = Poll.objects.filter(node=node).order_by("-created").first()
+    if not poll:
+        return False
+
+    days_since = (timezone.now() - poll.created).days
+    if days_since > 7:
+        return False
+
+    return poll.yes_count > 0
+
+
 def process_node_events(node, now_utc):
     from hackabot.apps.bot.models import Event
+
+    if not has_yes_responses_this_week(node):
+        return
 
     now_in_tz = now_utc.to(node.timezone or "UTC")
     events = Event.objects.filter(node=node)

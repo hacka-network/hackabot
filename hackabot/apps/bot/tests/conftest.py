@@ -89,6 +89,16 @@ def poll(db, node):
 
 
 @pytest.fixture
+def poll_with_yes(db, node):
+    return Poll.objects.create(
+        telegram_id="poll_with_yes",
+        node=node,
+        question="Who's coming this Thursday?",
+        yes_count=3,
+    )
+
+
+@pytest.fixture
 def mock_telegram_api(responses):
     def _setup(token="testtoken123"):
         base_url = "https://api.telegram.org"
