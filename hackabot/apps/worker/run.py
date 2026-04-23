@@ -3,6 +3,7 @@ import traceback
 
 import arrow
 import sentry_sdk
+from django.db import close_old_connections
 from django.utils import timezone
 
 from hackabot.apps.bot.telegram import (
@@ -19,8 +20,13 @@ POLL_TIMEZONE = "UTC"  # All polls sent at 7am UTC (= 3pm Bali)
 REMINDER_MINUTES_BEFORE = 30
 INVITE_GRACE_PERIOD_DAYS = 60
 WEEKDAY_NAMES = [
-    "Monday", "Tuesday", "Wednesday", "Thursday",
-    "Friday", "Saturday", "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
 ]
 SUMMARY_DAY = 4  # Friday
 SUMMARY_HOUR = 7
@@ -177,7 +183,9 @@ def process_weekly_summary(now_utc):
             result = send_weekly_attendance_summary()
             if result:
                 global_group.last_weekly_summary_sent_at = timezone.now()
-                global_group.save(update_fields=["last_weekly_summary_sent_at"])
+                global_group.save(
+                    update_fields=["last_weekly_summary_sent_at"]
+                )
                 print("✅ Weekly summary sent and timestamp updated")
         except Exception as e:
             print(f"❌ Error sending weekly summary: {e}")
@@ -233,6 +241,7 @@ def run_worker():
     print("Worker will check for tasks every 30 seconds...")
 
     while 1:
+        close_old_connections()
         try:
             check_all_nodes()
             time.sleep(30)
