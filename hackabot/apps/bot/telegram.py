@@ -479,3 +479,89 @@ def send_weekly_attendance_summary():
     send(global_group.telegram_id, message)
     print("✅ Weekly attendance summary sent")
     return True
+
+
+def send_yearly_summary():
+    from django.db.models import Sum
+    from django.utils import timezone
+
+    from .models import ActivityDay, Group, PollAnswer
+
+    print("🎉 Preparing yearly summary...")
+
+    try:
+        global_group = Group.objects.get(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID)
+        )
+    except Group.DoesNotExist:
+        print("❌ Global group not found, skipping yearly summary")
+        return False
+
+    year = timezone.now().year
+
+    yes_answers = PollAnswer.objects.filter(
+        yes=True,
+        poll__created__year=year,
+        poll__node__isnull=False,
+    ).select_related("poll__node")
+
+    node_totals = dict()
+    for answer in yes_answers:
+        node = answer.poll.node
+        if node.id not in node_totals:
+            node_totals[node.id] = dict(node=node, count=0)
+        node_totals[node.id]["count"] += 1
+
+    top_yapper = (
+        ActivityDay.objects.filter(
+            group=global_group,
+            date__year=year,
+        )
+        .values("person", "person__username", "person__first_name")
+        .annotate(total_messages=Sum("message_count"))
+        .order_by("-total_messages")
+        .first()
+    )
+
+    has_yapper = bool(top_yapper and top_yapper["total_messages"] > 0)
+    if not node_totals and not has_yapper:
+        print("🎉 No activity this year, skipping yearly summary")
+        return False
+
+    lines = [f"🎉🎊 Hacka\\* *Network {year} Year in Review* 🎊🎉"]
+    lines.append("")
+
+    if node_totals:
+        top_node_data = max(node_totals.values(), key=lambda d: d["count"])
+        node = top_node_data["node"]
+        name = f"{node.emoji} {node.name}" if node.emoji else node.name
+        lines.append(
+            f"🏅 *Node of the Year:* {name} "
+            f"({top_node_data['count']} attendances)"
+        )
+        lines.append("")
+
+    if has_yapper:
+        username = top_yapper["person__username"]
+        first_name = top_yapper["person__first_name"]
+        msg_count = top_yapper["total_messages"]
+        if username:
+            escaped = username.replace("_", "\\_").replace("*", "\\*")
+            display_name = f"@{escaped}"
+        else:
+            escaped = (first_name or "Someone").replace("_", "\\_")
+            escaped = escaped.replace("*", "\\*")
+            display_name = escaped
+        lines.append(
+            f"🏆 *Yapper of the Year:* {display_name} "
+            f"({msg_count} messages)"
+        )
+
+    message = "\n".join(lines)
+
+    print(
+        f"📤 Sending yearly summary to global group {global_group.telegram_id}"
+    )
+    send(global_group.telegram_id, message)
+    print("✅ Yearly summary sent")
+    return True

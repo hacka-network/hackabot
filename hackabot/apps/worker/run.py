@@ -11,6 +11,7 @@ from hackabot.apps.bot.telegram import (
     send_event_reminder,
     send_poll,
     send_weekly_attendance_summary,
+    send_yearly_summary,
     verify_webhook,
 )
 
@@ -30,6 +31,9 @@ WEEKDAY_NAMES = [
 ]
 SUMMARY_DAY = 4  # Friday
 SUMMARY_HOUR = 7
+YEARLY_SUMMARY_MONTH = 12
+YEARLY_SUMMARY_DAY = 31
+YEARLY_SUMMARY_HOUR = 7
 CLEANUP_HOUR = 0
 MAX_PHOTOS = 100
 
@@ -192,6 +196,51 @@ def process_weekly_summary(now_utc):
             sentry_sdk.capture_exception(e)
 
 
+def should_send_yearly_summary(global_group, now_utc):
+    if now_utc.month != YEARLY_SUMMARY_MONTH:
+        return False
+
+    if now_utc.day != YEARLY_SUMMARY_DAY:
+        return False
+
+    if now_utc.hour != YEARLY_SUMMARY_HOUR:
+        return False
+
+    if global_group.last_yearly_summary_sent_at:
+        days_since = (
+            timezone.now() - global_group.last_yearly_summary_sent_at
+        ).days
+        if days_since < 300:
+            return False
+
+    return True
+
+
+def process_yearly_summary(now_utc):
+    from hackabot.apps.bot.models import Group
+
+    try:
+        global_group = Group.objects.get(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID)
+        )
+    except Group.DoesNotExist:
+        return
+
+    if should_send_yearly_summary(global_group, now_utc):
+        print("🎉 Time to send yearly summary")
+        try:
+            result = send_yearly_summary()
+            if result:
+                global_group.last_yearly_summary_sent_at = timezone.now()
+                global_group.save(
+                    update_fields=["last_yearly_summary_sent_at"]
+                )
+                print("✅ Yearly summary sent and timestamp updated")
+        except Exception as e:
+            print(f"❌ Error sending yearly summary: {e}")
+            sentry_sdk.capture_exception(e)
+
+
 def should_cleanup_photos(now_utc):
     if now_utc.hour != CLEANUP_HOUR:
         return False
@@ -230,6 +279,7 @@ def check_all_nodes():
         process_node_events(node, now_utc)
 
     process_weekly_summary(now_utc)
+    process_yearly_summary(now_utc)
     process_photo_cleanup(now_utc)
 
 

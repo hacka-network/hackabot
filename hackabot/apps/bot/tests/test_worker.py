@@ -31,10 +31,12 @@ from hackabot.apps.worker.run import (
     process_node_events,
     process_node_poll,
     process_weekly_summary,
+    process_yearly_summary,
     should_send_event_reminder,
     should_send_global_invite,
     should_send_poll,
     should_send_weekly_summary,
+    should_send_yearly_summary,
 )
 
 
@@ -1090,6 +1092,269 @@ class TestWeeklySummaryMessage:
             assert "Biggest yapper" in request_body
             assert "3 messages" in request_body
             assert "999 messages" not in request_body
+
+
+class TestShouldSendYearlySummary:
+    @pytest.fixture
+    def global_group(self, db):
+        return Group.objects.create(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID),
+            display_name="Hacka* Network Global",
+        )
+
+    def test_returns_true_on_dec_31_at_correct_time(self, global_group):
+        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
+        assert (
+            should_send_yearly_summary(global_group, dec_31_7am_utc) is True
+        )
+
+    def test_returns_false_on_dec_30(self, global_group):
+        dec_30_7am_utc = arrow.Arrow(2026, 12, 30, 7, 0, 0, tzinfo="UTC")
+        assert (
+            should_send_yearly_summary(global_group, dec_30_7am_utc) is False
+        )
+
+    def test_returns_false_on_jan_1(self, global_group):
+        jan_1_7am_utc = arrow.Arrow(2027, 1, 1, 7, 0, 0, tzinfo="UTC")
+        assert (
+            should_send_yearly_summary(global_group, jan_1_7am_utc) is False
+        )
+
+    def test_returns_false_on_wrong_hour(self, global_group):
+        dec_31_8am_utc = arrow.Arrow(2026, 12, 31, 8, 0, 0, tzinfo="UTC")
+        assert (
+            should_send_yearly_summary(global_group, dec_31_8am_utc) is False
+        )
+
+    def test_returns_false_if_sent_recently(self, global_group):
+        global_group.last_yearly_summary_sent_at = (
+            timezone.now() - timedelta(days=10)
+        )
+        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
+        assert (
+            should_send_yearly_summary(global_group, dec_31_7am_utc) is False
+        )
+
+    def test_returns_true_if_never_sent(self, global_group):
+        global_group.last_yearly_summary_sent_at = None
+        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
+        assert (
+            should_send_yearly_summary(global_group, dec_31_7am_utc) is True
+        )
+
+
+class TestProcessYearlySummary:
+    @pytest.fixture
+    def global_group(self, db):
+        return Group.objects.create(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID),
+            display_name="Hacka* Network Global",
+        )
+
+    @responses.activate
+    def test_sends_summary_and_updates_timestamp(
+        self, db, global_group, group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node = Node.objects.create(
+                group=group,
+                name="Test Node",
+                emoji="🚀",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_yearly_proc_test",
+                node=node,
+                question="Who's coming?",
+            )
+            person = Person.objects.create(
+                telegram_id=88888, first_name="Eve", username="eve"
+            )
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
+            process_yearly_summary(dec_31_7am_utc)
+
+            global_group.refresh_from_db()
+            assert global_group.last_yearly_summary_sent_at is not None
+            assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_does_not_send_on_wrong_day(self, global_group):
+        nov_15_7am_utc = arrow.Arrow(2026, 11, 15, 7, 0, 0, tzinfo="UTC")
+        process_yearly_summary(nov_15_7am_utc)
+
+        global_group.refresh_from_db()
+        assert global_group.last_yearly_summary_sent_at is None
+        assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_does_not_send_if_global_group_missing(self, db):
+        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
+        process_yearly_summary(dec_31_7am_utc)
+
+        assert len(responses.calls) == 0
+
+
+class TestYearlySummaryMessage:
+    @pytest.fixture
+    def global_group(self, db):
+        return Group.objects.create(
+            telegram_id=int(HACKA_NETWORK_GLOBAL_CHAT_ID),
+            display_name="Hacka* Network Global",
+        )
+
+    @responses.activate
+    def test_summary_includes_yapper_and_node_of_year(
+        self, db, global_group, group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node_a = Node.objects.create(
+                group=group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            other_group = Group.objects.create(
+                telegram_id=-1009998888,
+                display_name="Other Node Group",
+            )
+            node_b = Node.objects.create(
+                group=other_group,
+                name="Lisbon",
+                emoji="🇵🇹",
+                timezone="UTC",
+            )
+
+            now = timezone.now()
+            year = now.year
+            top_yapper = Person.objects.create(
+                telegram_id=10001,
+                first_name="Talker",
+                username="big_talker",
+            )
+            quiet = Person.objects.create(
+                telegram_id=10002, first_name="Quiet", username="quiet"
+            )
+            for i in range(5):
+                p = Poll.objects.create(
+                    telegram_id=f"poll_year_a_{i}",
+                    node=node_a,
+                    question="?",
+                )
+                PollAnswer.objects.create(
+                    poll=p, person=top_yapper, yes=True
+                )
+            for i in range(3):
+                p = Poll.objects.create(
+                    telegram_id=f"poll_year_b_{i}",
+                    node=node_b,
+                    question="?",
+                )
+                PollAnswer.objects.create(poll=p, person=quiet, yes=True)
+
+            ActivityDay.objects.create(
+                person=top_yapper,
+                group=global_group,
+                date=now.date(),
+                message_count=500,
+            )
+            ActivityDay.objects.create(
+                person=quiet,
+                group=global_group,
+                date=now.date(),
+                message_count=10,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            from hackabot.apps.bot.telegram import send_yearly_summary
+
+            assert send_yearly_summary() is True
+
+            assert len(responses.calls) == 1
+            body = responses.calls[0].request.body.decode()
+            assert f"Hacka\\\\* *Network {year} Year in Review*" in body
+            assert "Yapper of the Year" in body
+            assert "big\\\\_talker" in body
+            assert "500 messages" in body
+            assert "Node of the Year" in body
+            assert "Bali" in body
+            assert "5 attendances" in body
+            assert "Lisbon" not in body
+            assert "Happy New Year" not in body
+
+    @responses.activate
+    def test_summary_excludes_activity_from_other_years(
+        self, db, global_group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            person = Person.objects.create(
+                telegram_id=20001, first_name="Loud", username="loud"
+            )
+            now = timezone.now()
+            ActivityDay.objects.create(
+                person=person,
+                group=global_group,
+                date=now.date().replace(year=now.year - 1),
+                message_count=9999,
+            )
+            ActivityDay.objects.create(
+                person=person,
+                group=global_group,
+                date=now.date(),
+                message_count=7,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            from hackabot.apps.bot.telegram import send_yearly_summary
+
+            assert send_yearly_summary() is True
+            body = responses.calls[0].request.body.decode()
+            assert "7 messages" in body
+            assert "9999 messages" not in body
+
+    @responses.activate
+    def test_summary_skipped_if_no_activity(self, db, global_group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            from hackabot.apps.bot.telegram import send_yearly_summary
+
+            assert send_yearly_summary() is False
+            assert len(responses.calls) == 0
 
 
 class TestShouldSendGlobalInvite:
