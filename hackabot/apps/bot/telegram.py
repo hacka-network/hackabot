@@ -429,7 +429,7 @@ def send_weekly_attendance_summary():
     top_talker = (
         ActivityDay.objects.filter(
             group=global_group,
-            date__gte=one_week_ago.date(),
+            date__gt=one_week_ago.date(),
         )
         .values("person", "person__username", "person__first_name")
         .annotate(total_messages=Sum("message_count"))

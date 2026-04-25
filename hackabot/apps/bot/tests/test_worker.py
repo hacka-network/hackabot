@@ -1030,6 +1030,67 @@ class TestWeeklySummaryMessage:
             assert "Charlie" in request_body
             assert "25 messages" in request_body
 
+    @responses.activate
+    def test_summary_excludes_activity_from_seven_days_ago(
+        self, db, global_group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node_group = Group.objects.create(
+                telegram_id=-1009999999,
+                display_name="Node Group",
+            )
+            node = Node.objects.create(
+                group=node_group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_boundary_test",
+                node=node,
+                question="Who's coming?",
+            )
+            person = Person.objects.create(
+                telegram_id=44444, first_name="Dana", username="dana"
+            )
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+            now = timezone.now()
+            seven_days_ago = (now - timedelta(days=7)).date()
+            six_days_ago = (now - timedelta(days=6)).date()
+            ActivityDay.objects.create(
+                person=person,
+                group=global_group,
+                date=seven_days_ago,
+                message_count=999,
+            )
+            ActivityDay.objects.create(
+                person=person,
+                group=global_group,
+                date=six_days_ago,
+                message_count=3,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_7am_utc)
+
+            assert len(responses.calls) == 1
+            request_body = responses.calls[0].request.body.decode()
+            assert "Biggest yapper" in request_body
+            assert "3 messages" in request_body
+            assert "999 messages" not in request_body
+
 
 class TestShouldSendGlobalInvite:
     def test_returns_true_for_old_node_with_invite_enabled(self, node):
