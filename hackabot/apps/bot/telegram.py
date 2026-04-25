@@ -1,11 +1,28 @@
 import hmac
 import os
 import sys
+from collections import defaultdict
+from datetime import timedelta
 
 import requests
+from django.db.models import Count, Q, Sum
+from django.utils import timezone
 from requests import HTTPError
 
+from .models import (
+    ActivityDay,
+    Group,
+    MeetupPhoto,
+    Node,
+    Person,
+    Poll,
+    PollAnswer,
+)
+
 REQUEST_TIMEOUT = 30
+# Fullwidth asterisk (U+FF0A) so the whole title can sit inside a Markdown
+# bold range — Telegram's MD V1 parser doesn't reliably handle \* inside *…*.
+HACKA_BOLD = "Hacka＊"
 
 
 def _raise_for_status(resp):
@@ -177,8 +194,6 @@ def export_chat_invite_link(chat_id):
 
 
 def send_poll(node, when="Thursday", send_invite=True):
-    from .models import Poll
-
     chat_id = node.group.telegram_id
     name = f"{node.emoji} {node.name}" if node.emoji else node.name
 
@@ -378,14 +393,46 @@ def restrict_chat_member(chat_id, user_id, until_date):
     print("✅ User restricted successfully")
 
 
+def _md_escape(s):
+    return (s or "").replace("_", "\\_").replace("*", "\\*")
+
+
+def _display_person(username, first_name):
+    if username:
+        return f"@{_md_escape(username)}"
+    return _md_escape(first_name or "Someone")
+
+
+def _monday_of_week(d):
+    return d - timedelta(days=d.weekday())
+
+
+def _longest_active_streak(person_ids, current_monday):
+    if not person_ids:
+        return 0, None
+    person_mondays = defaultdict(set)
+    for pa in PollAnswer.objects.filter(
+        yes=True, person_id__in=person_ids
+    ).select_related("poll"):
+        person_mondays[pa.person_id].add(
+            _monday_of_week(pa.poll.created.date())
+        )
+    best_count = 0
+    best_pid = None
+    for pid in person_ids:
+        mondays = person_mondays[pid]
+        streak = 0
+        m = current_monday
+        while m in mondays:
+            streak += 1
+            m -= timedelta(days=7)
+        if streak > best_count:
+            best_count = streak
+            best_pid = pid
+    return best_count, best_pid
+
+
 def send_weekly_attendance_summary():
-    from datetime import timedelta
-
-    from django.db.models import Sum
-    from django.utils import timezone
-
-    from .models import ActivityDay, Group, PollAnswer
-
     print("📊 Preparing weekly attendance summary...")
 
     try:
@@ -403,9 +450,8 @@ def send_weekly_attendance_summary():
         poll__node__isnull=False,
     ).select_related("poll__node", "person")
 
-    node_attendance = {}
+    node_attendance = dict()
     all_person_ids = set()
-
     for answer in yes_answers:
         node = answer.poll.node
         if node.id not in node_attendance:
@@ -416,17 +462,17 @@ def send_weekly_attendance_summary():
         node_attendance[node.id]["person_ids"].add(answer.person_id)
         all_person_ids.add(answer.person_id)
 
-    nodes_with_attendance = [
-        data
-        for data in node_attendance.values()
-        if len(data["person_ids"]) > 0
-    ]
+    nodes_with_attendance = sorted(
+        [d for d in node_attendance.values() if d["person_ids"]],
+        key=lambda x: len(x["person_ids"]),
+        reverse=True,
+    )
 
     if not nodes_with_attendance:
         print("📊 No attendance this week, skipping summary")
         return False
 
-    top_talker = (
+    top_yapper = (
         ActivityDay.objects.filter(
             group=global_group,
             date__gt=one_week_ago.date(),
@@ -437,16 +483,54 @@ def send_weekly_attendance_summary():
         .first()
     )
 
-    total_attendees = len(all_person_ids)
-    lines = ["📊 Hacka\\* *Network Weekly Stats*"]
-    lines.append("")
-    lines.append(f"🌍 *{total_attendees} people* came to one of the meetups!")
-    lines.append("")
-
-    nodes_with_attendance.sort(
-        key=lambda x: len(x["person_ids"]),
-        reverse=True,
+    node_group_ids = list(
+        Node.objects.exclude(group__isnull=True)
+        .values_list("group_id", flat=True)
+        .distinct()
     )
+    loudest = (
+        ActivityDay.objects.filter(
+            date__gt=one_week_ago.date(),
+            group_id__in=node_group_ids,
+        )
+        .exclude(group=global_group)
+        .values("group", "group__display_name")
+        .annotate(total=Sum("message_count"))
+        .order_by("-total")
+        .first()
+    )
+
+    countries = {
+        d["node"].emoji for d in nodes_with_attendance if d["node"].emoji
+    }
+
+    prior_attendees = set(
+        PollAnswer.objects.filter(
+            yes=True,
+            poll__created__lt=one_week_ago,
+            person_id__in=all_person_ids,
+        ).values_list("person_id", flat=True)
+    )
+    first_timer_ids = all_person_ids - prior_attendees
+    first_timers = list(Person.objects.filter(id__in=first_timer_ids))
+
+    current_monday = _monday_of_week(timezone.now().date())
+    top_streak_count, top_streak_pid = _longest_active_streak(
+        all_person_ids, current_monday
+    )
+
+    total_attendees = len(all_person_ids)
+    lines = [f"📊 *{HACKA_BOLD} Network Weekly Stats*", ""]
+    if countries:
+        lines.append(
+            f"🌍 *{total_attendees} people* across "
+            f"*{len(countries)} countries* came to one of the meetups!"
+        )
+    else:
+        lines.append(
+            f"🌍 *{total_attendees} people* came to one of the meetups!"
+        )
+    lines.append("")
 
     for data in nodes_with_attendance:
         node = data["node"]
@@ -454,22 +538,48 @@ def send_weekly_attendance_summary():
         name = f"{node.emoji} {node.name}" if node.emoji else node.name
         lines.append(f"• {name}: {count}")
 
-    if top_talker and top_talker["total_messages"] > 0:
-        username = top_talker["person__username"]
-        first_name = top_talker["person__first_name"]
-        msg_count = top_talker["total_messages"]
-        if username:
-            escaped = username.replace("_", "\\_").replace("*", "\\*")
-            display_name = f"@{escaped}"
-        else:
-            escaped = (first_name or "Someone").replace("_", "\\_")
-            escaped = escaped.replace("*", "\\*")
-            display_name = escaped
-        lines.append("")
-        lines.append(
-            f"🏆 Biggest yapper of the week is {display_name} "
-            f"({msg_count} messages)"
+    lines.append("")
+    if top_yapper and top_yapper["total_messages"] > 0:
+        name = _display_person(
+            top_yapper["person__username"],
+            top_yapper["person__first_name"],
         )
+        lines.append(
+            f"🏆 Biggest yapper of the week is {name} "
+            f"({top_yapper['total_messages']} messages)"
+        )
+
+    if loudest:
+        nfg = (
+            Node.objects.filter(group_id=loudest["group"])
+            .order_by("name")
+            .first()
+        )
+        if nfg:
+            nname = f"{nfg.emoji} {nfg.name}" if nfg.emoji else nfg.name
+        else:
+            nname = _md_escape(loudest["group__display_name"])
+        lines.append(
+            f"🗣️ Yappiest group chat of the week is {nname} "
+            f"({loudest['total']} messages)"
+        )
+
+    if top_streak_count >= 2 and top_streak_pid:
+        p = Person.objects.get(id=top_streak_pid)
+        name = _display_person(p.username, p.first_name)
+        lines.append(
+            f"🔥 Longest streak is {name} "
+            f"({top_streak_count} attendances in a row!)"
+        )
+
+    if first_timers:
+        if len(first_timers) <= 5:
+            names = ", ".join(
+                _display_person(p.username, p.first_name) for p in first_timers
+            )
+            lines.append(f"👋 First-timers this week: {names}")
+        else:
+            lines.append(f"👋 {len(first_timers)} first-timers this week")
 
     message = "\n".join(lines)
 
@@ -482,11 +592,6 @@ def send_weekly_attendance_summary():
 
 
 def send_yearly_summary():
-    from django.db.models import Sum
-    from django.utils import timezone
-
-    from .models import ActivityDay, Group, PollAnswer
-
     print("🎉 Preparing yearly summary...")
 
     try:
@@ -499,68 +604,167 @@ def send_yearly_summary():
 
     year = timezone.now().year
 
-    yes_answers = PollAnswer.objects.filter(
+    yes_year = PollAnswer.objects.filter(
         yes=True,
         poll__created__year=year,
         poll__node__isnull=False,
     ).select_related("poll__node")
 
     node_totals = dict()
-    for answer in yes_answers:
+    for answer in yes_year:
         node = answer.poll.node
         if node.id not in node_totals:
             node_totals[node.id] = dict(node=node, count=0)
         node_totals[node.id]["count"] += 1
+    top_nodes = sorted(
+        node_totals.values(), key=lambda d: d["count"], reverse=True
+    )[:3]
 
-    top_yapper = (
-        ActivityDay.objects.filter(
-            group=global_group,
-            date__year=year,
-        )
+    top_yappers = list(
+        ActivityDay.objects.filter(group=global_group, date__year=year)
         .values("person", "person__username", "person__first_name")
         .annotate(total_messages=Sum("message_count"))
-        .order_by("-total_messages")
+        .order_by("-total_messages")[:3]
+    )
+
+    top_photographer = (
+        MeetupPhoto.objects.filter(
+            created__year=year, uploaded_by__isnull=False
+        )
+        .values(
+            "uploaded_by__username",
+            "uploaded_by__first_name",
+        )
+        .annotate(c=Count("id"))
+        .order_by("-c")
         .first()
     )
 
-    has_yapper = bool(top_yapper and top_yapper["total_messages"] > 0)
-    if not node_totals and not has_yapper:
+    explorer = (
+        PollAnswer.objects.filter(
+            yes=True,
+            poll__created__year=year,
+            poll__node__isnull=False,
+        )
+        .values("person__username", "person__first_name")
+        .annotate(distinct_nodes=Count("poll__node", distinct=True))
+        .order_by("-distinct_nodes")
+        .first()
+    )
+
+    regular = (
+        PollAnswer.objects.filter(
+            yes=True,
+            poll__created__year=year,
+            poll__node__isnull=False,
+        )
+        .values(
+            "person__username",
+            "person__first_name",
+            "poll__node__name",
+            "poll__node__emoji",
+        )
+        .annotate(c=Count("id"))
+        .order_by("-c")
+        .first()
+    )
+
+    new_nodes = list(
+        Node.objects.filter(created__year=year).order_by("created")
+    )
+
+    best_poll = (
+        Poll.objects.filter(created__year=year, node__isnull=False)
+        .annotate(real_yes=Count("pollanswer", filter=Q(pollanswer__yes=True)))
+        .filter(real_yes__gt=0)
+        .order_by("-real_yes")
+        .select_related("node")
+        .first()
+    )
+
+    has_yappers = bool(top_yappers and top_yappers[0]["total_messages"] > 0)
+    if not top_nodes and not has_yappers:
         print("🎉 No activity this year, skipping yearly summary")
         return False
 
-    lines = [f"🎉🎊 Hacka\\* *Network {year} Year in Review* 🎊🎉"]
-    lines.append("")
+    lines = [
+        f"🎉 *{HACKA_BOLD} Network {year} Year in Review*",
+        "",
+    ]
 
-    if node_totals:
-        top_node_data = max(node_totals.values(), key=lambda d: d["count"])
-        node = top_node_data["node"]
-        name = f"{node.emoji} {node.name}" if node.emoji else node.name
-        lines.append(
-            f"🏅 *Node of the Year:* {name} "
-            f"({top_node_data['count']} attendances)"
-        )
+    if has_yappers:
+        lines.append("*Top yappers:*")
+        for medal, t in zip(["🥇", "🥈", "🥉"], top_yappers):
+            name = _display_person(
+                t["person__username"], t["person__first_name"]
+            )
+            lines.append(f"{medal} {name} ({t['total_messages']} messages)")
         lines.append("")
 
-    if has_yapper:
-        username = top_yapper["person__username"]
-        first_name = top_yapper["person__first_name"]
-        msg_count = top_yapper["total_messages"]
-        if username:
-            escaped = username.replace("_", "\\_").replace("*", "\\*")
-            display_name = f"@{escaped}"
-        else:
-            escaped = (first_name or "Someone").replace("_", "\\_")
-            escaped = escaped.replace("*", "\\*")
-            display_name = escaped
+    if top_nodes:
+        lines.append("*Top nodes:*")
+        for medal, n_data in zip(["🥇", "🥈", "🥉"], top_nodes):
+            node = n_data["node"]
+            name = f"{node.emoji} {node.name}" if node.emoji else node.name
+            lines.append(f"{medal} {name} ({n_data['count']} attendances)")
+        lines.append("")
+
+    if new_nodes:
+        lines.append("*New nodes this year:*")
+        for n in new_nodes:
+            nname = f"{n.emoji} {n.name}" if n.emoji else n.name
+            lines.append(f"• {nname}")
+        lines.append("")
+
+    if top_photographer and top_photographer["c"] > 0:
+        name = _display_person(
+            top_photographer["uploaded_by__username"],
+            top_photographer["uploaded_by__first_name"],
+        )
         lines.append(
-            f"🏆 *Yapper of the Year:* {display_name} "
-            f"({msg_count} messages)"
+            f"📸 *Photographer of the Year:* {name} "
+            f"({top_photographer['c']} photos)"
+        )
+
+    if explorer and explorer["distinct_nodes"] >= 2:
+        name = _display_person(
+            explorer["person__username"],
+            explorer["person__first_name"],
+        )
+        lines.append(
+            f"🧭 *The Explorer:* {name} "
+            f"(visited {explorer['distinct_nodes']} different nodes)"
+        )
+
+    if regular and regular["c"] >= 2:
+        node_name = (
+            f"{regular['poll__node__emoji']} " f"{regular['poll__node__name']}"
+            if regular["poll__node__emoji"]
+            else regular["poll__node__name"]
+        )
+        name = _display_person(
+            regular["person__username"],
+            regular["person__first_name"],
+        )
+        lines.append(
+            f"🪑 *The Regular:* {name} went to {node_name} "
+            f"{regular['c']} times"
+        )
+
+    if best_poll:
+        node = best_poll.node
+        nname = f"{node.emoji} {node.name}" if node.emoji else node.name
+        date_str = best_poll.created.strftime("%b %d")
+        lines.append(
+            f"🏟️ *Attendance record:* {nname} with "
+            f"{best_poll.real_yes} attendees (week of {date_str})"
         )
 
     message = "\n".join(lines)
 
     print(
-        f"📤 Sending yearly summary to global group {global_group.telegram_id}"
+        f"📤 Sending yearly summary to global group "
+        f"{global_group.telegram_id}"
     )
     send(global_group.telegram_id, message)
     print("✅ Yearly summary sent")

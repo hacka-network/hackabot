@@ -1,5 +1,5 @@
 import os
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta
 from unittest.mock import MagicMock, patch
 
 import arrow
@@ -11,6 +11,7 @@ from hackabot.apps.bot.models import (
     ActivityDay,
     Event,
     Group,
+    MeetupPhoto,
     Node,
     Person,
     Poll,
@@ -138,18 +139,14 @@ class TestShouldSendEventReminder:
         assert should_send_event_reminder(event, thursday_9am) is True
 
     def test_drinks_fires_at_event_time(self, node):
-        event = Event(
-            node=node, type="drinks", time=time(18, 0), where=""
-        )
+        event = Event(node=node, type="drinks", time=time(18, 0), where="")
         thursday_6pm = arrow.Arrow(
             2024, 1, 11, 18, 0, 0, tzinfo="America/New_York"
         )
         assert should_send_event_reminder(event, thursday_6pm) is True
 
     def test_drinks_does_not_fire_30_mins_before(self, node):
-        event = Event(
-            node=node, type="drinks", time=time(18, 0), where=""
-        )
+        event = Event(node=node, type="drinks", time=time(18, 0), where="")
         thursday_530pm = arrow.Arrow(
             2024, 1, 11, 17, 30, 0, tzinfo="America/New_York"
         )
@@ -247,9 +244,7 @@ class TestProcessNodeEvents:
         assert len(responses.calls) == 0
 
     @responses.activate
-    def test_skips_reminders_when_no_yes_responses(
-        self, node, events
-    ):
+    def test_skips_reminders_when_no_yes_responses(self, node, events):
         Poll.objects.create(
             telegram_id="poll_no_yes",
             node=node,
@@ -269,9 +264,7 @@ class TestProcessNodeEvents:
         assert len(responses.calls) == 0
 
     @responses.activate
-    def test_skips_reminders_when_no_poll_exists(
-        self, node, events
-    ):
+    def test_skips_reminders_when_no_poll_exists(self, node, events):
         thursday_9am = arrow.Arrow(
             2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
         )
@@ -437,7 +430,9 @@ class TestEventReminderMessages:
             assert "Rooftop Bar" in request_body
 
     @responses.activate
-    def test_drinks_reminder_without_location(self, node, group, poll_with_yes):
+    def test_drinks_reminder_without_location(
+        self, node, group, poll_with_yes
+    ):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -549,9 +544,7 @@ class TestErrorHandling:
             )
 
             monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
-            with patch(
-                "hackabot.apps.worker.run.sentry_sdk"
-            ) as mock_sentry:
+            with patch("hackabot.apps.worker.run.sentry_sdk") as mock_sentry:
                 process_node_poll(node, monday_7am_utc)
                 assert mock_sentry.capture_exception.called
 
@@ -579,9 +572,7 @@ class TestErrorHandling:
             thursday_9am = arrow.Arrow(
                 2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
             )
-            with patch(
-                "hackabot.apps.worker.run.sentry_sdk"
-            ) as mock_sentry:
+            with patch("hackabot.apps.worker.run.sentry_sdk") as mock_sentry:
                 process_node_events(node, thursday_9am)
                 assert mock_sentry.capture_exception.called
 
@@ -709,13 +700,10 @@ class TestShouldSendWeeklySummary:
             should_send_weekly_summary(global_group, friday_8am_utc) is False
         )
 
-    def test_returns_true_at_any_minute_in_summary_hour(
-        self, global_group
-    ):
+    def test_returns_true_at_any_minute_in_summary_hour(self, global_group):
         friday_7_30am_utc = arrow.Arrow(2024, 1, 12, 7, 30, 0, tzinfo="UTC")
         assert (
-            should_send_weekly_summary(global_group, friday_7_30am_utc)
-            is True
+            should_send_weekly_summary(global_group, friday_7_30am_utc) is True
         )
 
     def test_returns_false_if_summary_sent_recently(self, global_group):
@@ -1093,6 +1081,202 @@ class TestWeeklySummaryMessage:
             assert "3 messages" in request_body
             assert "999 messages" not in request_body
 
+    @responses.activate
+    def test_summary_includes_country_count(self, db, global_group, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            other_group = Group.objects.create(
+                telegram_id=-1009998888, display_name="Other Group"
+            )
+            node1 = Node.objects.create(
+                group=group,
+                name="Hackagu",
+                emoji="🇮🇩",
+                timezone="UTC",
+            )
+            node2 = Node.objects.create(
+                group=other_group,
+                name="Hackaboa",
+                emoji="🇵🇹",
+                timezone="UTC",
+            )
+            poll1 = Poll.objects.create(
+                telegram_id="poll_c1", node=node1, question="?"
+            )
+            poll2 = Poll.objects.create(
+                telegram_id="poll_c2", node=node2, question="?"
+            )
+            person1 = Person.objects.create(
+                telegram_id=70001, first_name="P1", username="p1"
+            )
+            person2 = Person.objects.create(
+                telegram_id=70002, first_name="P2", username="p2"
+            )
+            PollAnswer.objects.create(poll=poll1, person=person1, yes=True)
+            PollAnswer.objects.create(poll=poll2, person=person2, yes=True)
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_7am_utc)
+
+            body = responses.calls[0].request.body.decode()
+            assert "*2 countries*" in body
+
+    @responses.activate
+    def test_summary_includes_yappiest_group_chat(
+        self, db, global_group, group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node = Node.objects.create(
+                group=group,
+                name="Hackaigon",
+                emoji="🇻🇳",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_yappiest", node=node, question="?"
+            )
+            person = Person.objects.create(
+                telegram_id=70003, first_name="P", username="p_yap"
+            )
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+            ActivityDay.objects.create(
+                person=person,
+                group=group,
+                date=timezone.now().date(),
+                message_count=42,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_7am_utc)
+
+            body = responses.calls[0].request.body.decode()
+            assert "Yappiest group chat of the week is" in body
+            assert "Hackaigon" in body
+            assert "(42 messages)" in body
+
+    @responses.activate
+    def test_summary_includes_first_timers(self, db, global_group, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node = Node.objects.create(
+                group=group,
+                name="Hackagu",
+                emoji="🇮🇩",
+                timezone="UTC",
+            )
+            new_face = Person.objects.create(
+                telegram_id=70004,
+                first_name="New",
+                username="new_face",
+            )
+            returning = Person.objects.create(
+                telegram_id=70005,
+                first_name="Returning",
+                username="returning",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_ft", node=node, question="?"
+            )
+            PollAnswer.objects.create(poll=poll, person=new_face, yes=True)
+            PollAnswer.objects.create(poll=poll, person=returning, yes=True)
+
+            old_poll = Poll.objects.create(
+                telegram_id="poll_ft_old", node=node, question="?"
+            )
+            old_dt = timezone.now() - timedelta(days=30)
+            Poll.objects.filter(pk=old_poll.pk).update(created=old_dt)
+            PollAnswer.objects.create(
+                poll=old_poll, person=returning, yes=True
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_7am_utc)
+
+            body = responses.calls[0].request.body.decode()
+            assert "First-timers this week:" in body
+            assert "new\\\\_face" in body
+            assert "@returning" not in body
+
+    @responses.activate
+    def test_summary_includes_longest_streak(self, db, global_group, group):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node = Node.objects.create(
+                group=group,
+                name="Hackagu",
+                emoji="🇮🇩",
+                timezone="UTC",
+            )
+            person = Person.objects.create(
+                telegram_id=70006,
+                first_name="Streaker",
+                username="streaker",
+            )
+
+            now = timezone.now()
+            current_monday = now.date() - timedelta(days=now.weekday())
+            for weeks_back in range(3):
+                p = Poll.objects.create(
+                    telegram_id=f"poll_streak_{weeks_back}",
+                    node=node,
+                    question="?",
+                )
+                target_date = current_monday - timedelta(days=7 * weeks_back)
+                target_dt = timezone.make_aware(
+                    datetime.combine(target_date, time(12, 0))
+                )
+                Poll.objects.filter(pk=p.pk).update(created=target_dt)
+                PollAnswer.objects.create(poll=p, person=person, yes=True)
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_7am_utc)
+
+            body = responses.calls[0].request.body.decode()
+            assert "Longest streak is" in body
+            assert "@streaker" in body
+            assert "(3 attendances in a row!)" in body
+
 
 class TestShouldSendYearlySummary:
     @pytest.fixture
@@ -1103,10 +1287,8 @@ class TestShouldSendYearlySummary:
         )
 
     def test_returns_true_on_dec_31_at_correct_time(self, global_group):
-        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
-        assert (
-            should_send_yearly_summary(global_group, dec_31_7am_utc) is True
-        )
+        dec_31_noon_utc = arrow.Arrow(2026, 12, 31, 12, 0, 0, tzinfo="UTC")
+        assert should_send_yearly_summary(global_group, dec_31_noon_utc) is True
 
     def test_returns_false_on_dec_30(self, global_group):
         dec_30_7am_utc = arrow.Arrow(2026, 12, 30, 7, 0, 0, tzinfo="UTC")
@@ -1116,31 +1298,27 @@ class TestShouldSendYearlySummary:
 
     def test_returns_false_on_jan_1(self, global_group):
         jan_1_7am_utc = arrow.Arrow(2027, 1, 1, 7, 0, 0, tzinfo="UTC")
-        assert (
-            should_send_yearly_summary(global_group, jan_1_7am_utc) is False
-        )
+        assert should_send_yearly_summary(global_group, jan_1_7am_utc) is False
 
     def test_returns_false_on_wrong_hour(self, global_group):
-        dec_31_8am_utc = arrow.Arrow(2026, 12, 31, 8, 0, 0, tzinfo="UTC")
+        dec_31_1pm_utc = arrow.Arrow(2026, 12, 31, 13, 0, 0, tzinfo="UTC")
         assert (
-            should_send_yearly_summary(global_group, dec_31_8am_utc) is False
+            should_send_yearly_summary(global_group, dec_31_1pm_utc) is False
         )
 
     def test_returns_false_if_sent_recently(self, global_group):
-        global_group.last_yearly_summary_sent_at = (
-            timezone.now() - timedelta(days=10)
+        global_group.last_yearly_summary_sent_at = timezone.now() - timedelta(
+            days=10
         )
-        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
+        dec_31_noon_utc = arrow.Arrow(2026, 12, 31, 12, 0, 0, tzinfo="UTC")
         assert (
-            should_send_yearly_summary(global_group, dec_31_7am_utc) is False
+            should_send_yearly_summary(global_group, dec_31_noon_utc) is False
         )
 
     def test_returns_true_if_never_sent(self, global_group):
         global_group.last_yearly_summary_sent_at = None
-        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
-        assert (
-            should_send_yearly_summary(global_group, dec_31_7am_utc) is True
-        )
+        dec_31_noon_utc = arrow.Arrow(2026, 12, 31, 12, 0, 0, tzinfo="UTC")
+        assert should_send_yearly_summary(global_group, dec_31_noon_utc) is True
 
 
 class TestProcessYearlySummary:
@@ -1183,8 +1361,8 @@ class TestProcessYearlySummary:
                 status=200,
             )
 
-            dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
-            process_yearly_summary(dec_31_7am_utc)
+            dec_31_noon_utc = arrow.Arrow(2026, 12, 31, 12, 0, 0, tzinfo="UTC")
+            process_yearly_summary(dec_31_noon_utc)
 
             global_group.refresh_from_db()
             assert global_group.last_yearly_summary_sent_at is not None
@@ -1201,8 +1379,8 @@ class TestProcessYearlySummary:
 
     @responses.activate
     def test_does_not_send_if_global_group_missing(self, db):
-        dec_31_7am_utc = arrow.Arrow(2026, 12, 31, 7, 0, 0, tzinfo="UTC")
-        process_yearly_summary(dec_31_7am_utc)
+        dec_31_noon_utc = arrow.Arrow(2026, 12, 31, 12, 0, 0, tzinfo="UTC")
+        process_yearly_summary(dec_31_noon_utc)
 
         assert len(responses.calls) == 0
 
@@ -1216,7 +1394,7 @@ class TestYearlySummaryMessage:
         )
 
     @responses.activate
-    def test_summary_includes_yapper_and_node_of_year(
+    def test_summary_includes_all_year_in_review_sections(
         self, db, global_group, group
     ):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
@@ -1257,9 +1435,9 @@ class TestYearlySummaryMessage:
                     node=node_a,
                     question="?",
                 )
-                PollAnswer.objects.create(
-                    poll=p, person=top_yapper, yes=True
-                )
+                PollAnswer.objects.create(poll=p, person=top_yapper, yes=True)
+                if i == 0:
+                    PollAnswer.objects.create(poll=p, person=quiet, yes=True)
             for i in range(3):
                 p = Poll.objects.create(
                     telegram_id=f"poll_year_b_{i}",
@@ -1294,14 +1472,22 @@ class TestYearlySummaryMessage:
 
             assert len(responses.calls) == 1
             body = responses.calls[0].request.body.decode()
-            assert f"Hacka\\\\* *Network {year} Year in Review*" in body
-            assert "Yapper of the Year" in body
+            assert f"*Hacka\\uff0a Network {year} Year in Review*" in body
+            assert "Top yappers:" in body
             assert "big\\\\_talker" in body
             assert "500 messages" in body
-            assert "Node of the Year" in body
+            assert "Top nodes:" in body
             assert "Bali" in body
-            assert "5 attendances" in body
-            assert "Lisbon" not in body
+            assert "6 attendances" in body
+            assert "Lisbon" in body
+            assert "3 attendances" in body
+            assert "New nodes this year:" in body
+            assert "The Regular:" in body
+            assert "5 times" in body
+            assert "The Explorer:" in body
+            assert "2 different nodes" in body
+            assert "Attendance record:" in body
+            assert "2 attendees" in body
             assert "Happy New Year" not in body
 
     @responses.activate
@@ -1355,6 +1541,124 @@ class TestYearlySummaryMessage:
 
             assert send_yearly_summary() is False
             assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_summary_includes_photographer_of_the_year(
+        self, db, global_group, group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node = Node.objects.create(
+                group=group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            shutter = Person.objects.create(
+                telegram_id=30001,
+                first_name="Shutter",
+                username="shutter_bug",
+            )
+            other = Person.objects.create(
+                telegram_id=30002,
+                first_name="Other",
+                username="other",
+            )
+            for i in range(5):
+                MeetupPhoto.objects.create(
+                    node=node,
+                    telegram_file_id=f"file_shutter_{i}",
+                    image_data=b"data",
+                    uploaded_by=shutter,
+                )
+            MeetupPhoto.objects.create(
+                node=node,
+                telegram_file_id="file_other_0",
+                image_data=b"data",
+                uploaded_by=other,
+            )
+
+            ActivityDay.objects.create(
+                person=shutter,
+                group=global_group,
+                date=timezone.now().date(),
+                message_count=1,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            from hackabot.apps.bot.telegram import send_yearly_summary
+
+            assert send_yearly_summary() is True
+            body = responses.calls[0].request.body.decode()
+            assert "Photographer of the Year:" in body
+            assert "shutter\\\\_bug" in body
+            assert "5 photos" in body
+
+    @responses.activate
+    def test_summary_excludes_new_nodes_from_prior_years(
+        self, db, global_group, group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            old_node = Node.objects.create(
+                group=group,
+                name="OldNode",
+                emoji="👴",
+                timezone="UTC",
+            )
+            Node.objects.filter(pk=old_node.pk).update(
+                created=timezone.now() - timedelta(days=400)
+            )
+            new_group = Group.objects.create(
+                telegram_id=-2002, display_name="New"
+            )
+            new_node = Node.objects.create(
+                group=new_group,
+                name="NewNode",
+                emoji="🆕",
+                timezone="UTC",
+            )
+
+            person = Person.objects.create(
+                telegram_id=40001, first_name="P", username="p"
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_y_new", node=new_node, question="?"
+            )
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+            ActivityDay.objects.create(
+                person=person,
+                group=global_group,
+                date=timezone.now().date(),
+                message_count=1,
+            )
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            from hackabot.apps.bot.telegram import send_yearly_summary
+
+            assert send_yearly_summary() is True
+            body = responses.calls[0].request.body.decode()
+            assert "New nodes this year:" in body
+            assert "NewNode" in body
+            assert "OldNode" not in body
 
 
 class TestShouldSendGlobalInvite:
@@ -1432,9 +1736,7 @@ class TestPollGlobalInvite:
                 status=200,
             )
 
-            monday_7am_utc = arrow.Arrow(
-                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
-            )
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
             process_node_poll(node, monday_7am_utc)
 
             assert len(responses.calls) == 3
@@ -1474,9 +1776,7 @@ class TestPollGlobalInvite:
                 status=200,
             )
 
-            monday_7am_utc = arrow.Arrow(
-                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
-            )
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
             process_node_poll(node, monday_7am_utc)
 
             # sendPoll + pinChatMessage, no sendMessage for invite
@@ -1515,9 +1815,7 @@ class TestPollGlobalInvite:
                 status=200,
             )
 
-            monday_7am_utc = arrow.Arrow(
-                2024, 1, 8, 7, 0, 0, tzinfo="UTC"
-            )
+            monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")
             process_node_poll(node, monday_7am_utc)
 
             # sendPoll + pinChatMessage, no sendMessage for invite
