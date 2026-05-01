@@ -685,8 +685,8 @@ class TestShouldSendWeeklySummary:
         )
 
     def test_returns_true_on_friday_at_correct_time(self, global_group):
-        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-        assert should_send_weekly_summary(global_group, friday_7am_utc) is True
+        friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_3am_utc) is True
 
     def test_returns_false_on_wrong_day(self, global_group):
         thursday_7am_utc = arrow.Arrow(2024, 1, 11, 7, 0, 0, tzinfo="UTC")
@@ -695,37 +695,37 @@ class TestShouldSendWeeklySummary:
         )
 
     def test_returns_false_on_wrong_hour(self, global_group):
-        friday_8am_utc = arrow.Arrow(2024, 1, 12, 8, 0, 0, tzinfo="UTC")
+        friday_4am_utc = arrow.Arrow(2024, 1, 12, 4, 0, 0, tzinfo="UTC")
         assert (
-            should_send_weekly_summary(global_group, friday_8am_utc) is False
+            should_send_weekly_summary(global_group, friday_4am_utc) is False
         )
 
     def test_returns_true_at_any_minute_in_summary_hour(self, global_group):
-        friday_7_30am_utc = arrow.Arrow(2024, 1, 12, 7, 30, 0, tzinfo="UTC")
+        friday_3_30am_utc = arrow.Arrow(2024, 1, 12, 3, 30, 0, tzinfo="UTC")
         assert (
-            should_send_weekly_summary(global_group, friday_7_30am_utc) is True
+            should_send_weekly_summary(global_group, friday_3_30am_utc) is True
         )
 
     def test_returns_false_if_summary_sent_recently(self, global_group):
         global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(
             days=3
         )
-        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
+        friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
         assert (
-            should_send_weekly_summary(global_group, friday_7am_utc) is False
+            should_send_weekly_summary(global_group, friday_3am_utc) is False
         )
 
     def test_returns_true_if_summary_sent_over_6_days_ago(self, global_group):
         global_group.last_weekly_summary_sent_at = timezone.now() - timedelta(
             days=7
         )
-        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-        assert should_send_weekly_summary(global_group, friday_7am_utc) is True
+        friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_3am_utc) is True
 
     def test_returns_true_if_never_sent_summary(self, global_group):
         global_group.last_weekly_summary_sent_at = None
-        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-        assert should_send_weekly_summary(global_group, friday_7am_utc) is True
+        friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+        assert should_send_weekly_summary(global_group, friday_3am_utc) is True
 
 
 class TestProcessWeeklySummary:
@@ -772,8 +772,8 @@ class TestProcessWeeklySummary:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             global_group.refresh_from_db()
             assert global_group.last_weekly_summary_sent_at is not None
@@ -790,8 +790,8 @@ class TestProcessWeeklySummary:
 
     @responses.activate
     def test_does_not_send_if_global_group_missing(self, db):
-        friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-        process_weekly_summary(friday_7am_utc)
+        friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+        process_weekly_summary(friday_3am_utc)
 
         assert len(responses.calls) == 0
 
@@ -842,8 +842,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -857,8 +857,8 @@ class TestWeeklySummaryMessage:
 
             telegram.TELEGRAM_BOT_TOKEN = "testtoken"
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             global_group.refresh_from_db()
             assert global_group.last_weekly_summary_sent_at is None
@@ -900,8 +900,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -960,8 +960,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -1011,8 +1011,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -1072,8 +1072,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             assert len(responses.calls) == 1
             request_body = responses.calls[0].request.body.decode()
@@ -1125,8 +1125,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             body = responses.calls[0].request.body.decode()
             assert "*2 countries*" in body
@@ -1167,8 +1167,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             body = responses.calls[0].request.body.decode()
             assert "Yappiest group chat of the week is" in body
@@ -1220,8 +1220,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             body = responses.calls[0].request.body.decode()
             assert "First-timers this week:" in body
@@ -1269,8 +1269,8 @@ class TestWeeklySummaryMessage:
                 status=200,
             )
 
-            friday_7am_utc = arrow.Arrow(2024, 1, 12, 7, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_7am_utc)
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
 
             body = responses.calls[0].request.body.decode()
             assert "Longest streak is" in body
