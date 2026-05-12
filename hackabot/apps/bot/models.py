@@ -120,6 +120,10 @@ class Node(models.Model):
     )
     last_poll_sent_at = models.DateTimeField(null=True, blank=True)
     disabled = models.BooleanField(default=False)
+    unlisted = models.BooleanField(
+        default=False,
+        help_text="Hide from the public nodes API listing",
+    )
     send_global_invite = models.BooleanField(
         default=True,
         help_text="Send global chat invite with weekly poll",

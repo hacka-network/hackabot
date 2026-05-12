@@ -1075,7 +1075,9 @@ def api_nodes(request):
     if request.method != "GET":
         return HttpResponse(status=405)
 
-    nodes = Node.objects.all().order_by(F("established").asc(nulls_last=True))
+    nodes = Node.objects.filter(unlisted=False).order_by(
+        F("established").asc(nulls_last=True)
+    )
 
     nodes_data = []
     node_attending_map = {}

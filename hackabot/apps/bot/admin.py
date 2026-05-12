@@ -127,6 +127,7 @@ class NodeAdmin(admin.ModelAdmin):
         "id",
         "name",
         "disabled",
+        "unlisted",
         "send_global_invite",
         "emoji",
         "slug",
@@ -140,8 +141,8 @@ class NodeAdmin(admin.ModelAdmin):
         "group",
         "created",
     ]
-    list_filter = ["disabled", "send_global_invite"]
-    list_editable = ["disabled", "send_global_invite"]
+    list_filter = ["disabled", "unlisted", "send_global_invite"]
+    list_editable = ["disabled", "unlisted", "send_global_invite"]
 
     @admin.display(boolean=True, description="Group")
     def has_group(self, obj):

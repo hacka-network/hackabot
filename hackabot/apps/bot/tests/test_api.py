@@ -110,6 +110,17 @@ class TestApiNodes:
         names = [n["name"] for n in data["nodes"]]
         assert names == ["Has Year", "No Year"]
 
+    def test_unlisted_nodes_excluded_from_list(self, client, db):
+        Node.objects.all().delete()
+        Node.objects.create(name="Listed")
+        Node.objects.create(name="Hidden", unlisted=True)
+
+        response = client.get("/api/nodes/")
+
+        data = response.json()
+        names = [n["name"] for n in data["nodes"]]
+        assert names == ["Listed"]
+
     def test_people_filtered_by_privacy(self, client, db):
         group = Group.objects.create(
             telegram_id=-1001234567890,
@@ -992,6 +1003,15 @@ class TestApiNodeDetail:
         response = client.get("/api/nodes/disabled/")
 
         assert response.status_code == 404
+
+    def test_unlisted_node_accessible_by_slug(self, client, db):
+        Node.objects.all().delete()
+        Node.objects.create(name="Hidden", unlisted=True)
+
+        response = client.get("/api/nodes/hidden/")
+
+        assert response.status_code == 200
+        assert response.json()["node"]["name"] == "Hidden"
 
     def test_cors_headers(self, client, db):
         Node.objects.all().delete()
