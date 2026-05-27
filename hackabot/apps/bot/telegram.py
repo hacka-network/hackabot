@@ -293,9 +293,23 @@ def send_event_reminder(event):
     print(f"🔔 Sending event reminder: {event.type} for {node.name}")
 
     if event.type == "intros":
-        send(chat_id, f"🔔👋  Reminder! *Intros are at {time_str}*")
+        send(
+            chat_id,
+            f"🔔👋  Reminder! *Intros are at {time_str}*\n\n"
+            "• ~1 minute each\n"
+            "• Who you are, what you're working on (and who it's for)\n"
+            "• What you're making today\n"
+            "• Mention anything you'd like help with",
+        )
     elif event.type == "demos":
-        send(chat_id, f"🔔💻  Reminder! *Demos are at {time_str}*")
+        send(
+            chat_id,
+            f"🔔💻  Reminder! *Demos are at {time_str}*\n\n"
+            "• ~5 minutes each\n"
+            "• Quick re-intro + what your product does\n"
+            "• Show what you made today\n"
+            "• Anything fun/interesting you learned? Want feedback?\n",
+        )
     elif event.type == "lunch":
         if event.where:
             send(chat_id, f"🔔🍔  *Lunch at {time_str}* in {event.where}")
