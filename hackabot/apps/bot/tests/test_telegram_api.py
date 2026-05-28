@@ -288,6 +288,7 @@ class TestSendPoll:
             poll = Poll.objects.get(telegram_id="poll_new_123")
             assert poll.node == node
             assert poll.message_id == 1002
+            assert poll.is_attendance is True
             assert "Thursday" in poll.question
 
     @responses.activate

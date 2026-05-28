@@ -85,6 +85,7 @@ def poll(db, node):
         question="Are you coming this Thursday?",
         yes_count=0,
         no_count=0,
+        is_attendance=True,
     )
 
 
@@ -95,6 +96,7 @@ def poll_with_yes(db, node):
         node=node,
         question="Who's coming this Thursday?",
         yes_count=3,
+        is_attendance=True,
     )
 
 

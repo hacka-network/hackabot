@@ -251,6 +251,7 @@ class TestProcessNodeEvents:
             question="Who's coming?",
             yes_count=0,
             no_count=5,
+            is_attendance=True,
         )
 
         thursday_9am = arrow.Arrow(
@@ -265,6 +266,72 @@ class TestProcessNodeEvents:
 
     @responses.activate
     def test_skips_reminders_when_no_poll_exists(self, node, events):
+        thursday_9am = arrow.Arrow(
+            2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
+        )
+        process_node_events(node, thursday_9am)
+
+        for event in events:
+            event.refresh_from_db()
+            assert event.last_reminder_sent_at is None
+        assert len(responses.calls) == 0
+
+    @responses.activate
+    def test_reminder_not_shadowed_by_later_non_attendance_poll(
+        self, node, events
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            Poll.objects.create(
+                telegram_id="attendance_poll",
+                node=node,
+                question="Who's coming this Thursday?",
+                yes_count=4,
+                is_attendance=True,
+            )
+            later = Poll.objects.create(
+                telegram_id="fun_poll",
+                node=node,
+                question="Where are you working tomorrow?",
+                yes_count=0,
+                is_attendance=False,
+            )
+            Poll.objects.filter(pk=later.pk).update(
+                created=timezone.now() + timedelta(hours=1)
+            )
+
+            intros_event = events[0]
+            thursday_9am = arrow.Arrow(
+                2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
+            )
+            process_node_events(node, thursday_9am)
+
+            intros_event.refresh_from_db()
+            assert intros_event.last_reminder_sent_at is not None
+            assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_skips_reminders_for_non_attendance_poll_with_yes(
+        self, node, events
+    ):
+        Poll.objects.create(
+            telegram_id="fun_poll_yes",
+            node=node,
+            question="Where are you working?",
+            yes_count=5,
+            is_attendance=False,
+        )
+
         thursday_9am = arrow.Arrow(
             2024, 1, 11, 9, 0, 0, tzinfo="America/New_York"
         )

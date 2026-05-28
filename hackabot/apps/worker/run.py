@@ -1,5 +1,6 @@
 import time
 import traceback
+from datetime import timedelta
 
 import arrow
 import sentry_sdk
@@ -121,15 +122,13 @@ def process_node_poll(node, now_utc):
 def has_yes_responses_this_week(node):
     from hackabot.apps.bot.models import Poll
 
-    poll = Poll.objects.filter(node=node).order_by("-created").first()
-    if not poll:
-        return False
-
-    days_since = (timezone.now() - poll.created).days
-    if days_since > 7:
-        return False
-
-    return poll.yes_count > 0
+    week_ago = timezone.now() - timedelta(days=7)
+    return Poll.objects.filter(
+        node=node,
+        is_attendance=True,
+        created__gte=week_ago,
+        yes_count__gt=0,
+    ).exists()
 
 
 def process_node_events(node, now_utc):

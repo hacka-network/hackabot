@@ -206,6 +206,7 @@ class Poll(models.Model):
     question = models.CharField(max_length=500)
     yes_count = models.PositiveIntegerField(default=0)
     no_count = models.PositiveIntegerField(default=0)
+    is_attendance = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.question[:50]}..."
@@ -219,6 +220,7 @@ class Poll(models.Model):
             question=self.question,
             yes_count=self.yes_count,
             no_count=self.no_count,
+            is_attendance=self.is_attendance,
         )
 
 

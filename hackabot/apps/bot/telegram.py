@@ -230,6 +230,7 @@ def send_poll(node, when="Thursday", send_invite=True):
                 question=poll_data.get("question", ""),
                 yes_count=0,
                 no_count=0,
+                is_attendance=True,
             ),
         )
         print("✅ Poll saved to database")

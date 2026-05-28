@@ -189,7 +189,7 @@ def _handle_message(message_data):
     poll_data = message_data.get("poll")
     if poll_data:
         print("📊 Found poll in message, processing...")
-        _handle_poll_data(poll_data, group=group)
+        _handle_poll_data(poll_data)
     if chat_id == PHOTO_UPLOAD_CHAT_ID:
         photos = message_data.get("photo", [])
         caption = message_data.get("caption", "")
@@ -258,7 +258,7 @@ def _handle_timeout_command(chat_id, message_data):
     )
 
 
-def _handle_poll_data(poll_data, group=None):
+def _handle_poll_data(poll_data):
     print(
         f"📊 Handling poll data: {poll_data.get('question', 'unknown')[:50]}..."
     )
@@ -275,10 +275,6 @@ def _handle_poll_data(poll_data, group=None):
         yes_count=yes_count,
         no_count=no_count,
     )
-
-    if group:
-        node = group.node_set.first()
-        defaults["node"] = node
 
     poll, created = Poll.objects.update_or_create(
         telegram_id=poll_data["id"],

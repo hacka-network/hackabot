@@ -473,7 +473,8 @@ class TestWebhookPolls:
 
         poll = Poll.objects.get(telegram_id="poll_abc123")
         assert poll.question == "Who's coming this Thursday?"
-        assert poll.node == node
+        assert poll.node is None
+        assert poll.is_attendance is False
         assert poll.yes_count == 0
         assert poll.no_count == 0
 
