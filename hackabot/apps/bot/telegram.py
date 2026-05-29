@@ -519,16 +519,6 @@ def send_weekly_attendance_summary():
         d["node"].emoji for d in nodes_with_attendance if d["node"].emoji
     }
 
-    prior_attendees = set(
-        PollAnswer.objects.filter(
-            yes=True,
-            poll__created__lt=one_week_ago,
-            person_id__in=all_person_ids,
-        ).values_list("person_id", flat=True)
-    )
-    first_timer_ids = all_person_ids - prior_attendees
-    first_timers = list(Person.objects.filter(id__in=first_timer_ids))
-
     current_monday = _monday_of_week(timezone.now().date())
     top_streak_count, top_streak_pid = _longest_active_streak(
         all_person_ids, current_monday
@@ -586,15 +576,6 @@ def send_weekly_attendance_summary():
             f"🔥 Longest streak is {name} "
             f"({top_streak_count} attendances in a row!)"
         )
-
-    if first_timers:
-        if len(first_timers) <= 5:
-            names = ", ".join(
-                _display_person(p.username, p.first_name) for p in first_timers
-            )
-            lines.append(f"👋 First-timers this week: {names}")
-        else:
-            lines.append(f"👋 {len(first_timers)} first-timers this week")
 
     message = "\n".join(lines)
 

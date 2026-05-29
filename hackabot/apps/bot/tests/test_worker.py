@@ -1243,59 +1243,6 @@ class TestWeeklySummaryMessage:
             assert "(42 messages)" in body
 
     @responses.activate
-    def test_summary_includes_first_timers(self, db, global_group, group):
-        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
-            from hackabot.apps.bot import telegram
-
-            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
-
-            node = Node.objects.create(
-                group=group,
-                name="Hackagu",
-                emoji="🇮🇩",
-                timezone="UTC",
-            )
-            new_face = Person.objects.create(
-                telegram_id=70004,
-                first_name="New",
-                username="new_face",
-            )
-            returning = Person.objects.create(
-                telegram_id=70005,
-                first_name="Returning",
-                username="returning",
-            )
-            poll = Poll.objects.create(
-                telegram_id="poll_ft", node=node, question="?"
-            )
-            PollAnswer.objects.create(poll=poll, person=new_face, yes=True)
-            PollAnswer.objects.create(poll=poll, person=returning, yes=True)
-
-            old_poll = Poll.objects.create(
-                telegram_id="poll_ft_old", node=node, question="?"
-            )
-            old_dt = timezone.now() - timedelta(days=30)
-            Poll.objects.filter(pk=old_poll.pk).update(created=old_dt)
-            PollAnswer.objects.create(
-                poll=old_poll, person=returning, yes=True
-            )
-
-            responses.add(
-                responses.POST,
-                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
-                json={"ok": True, "result": {"message_id": 1001}},
-                status=200,
-            )
-
-            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
-            process_weekly_summary(friday_3am_utc)
-
-            body = responses.calls[0].request.body.decode()
-            assert "First-timers this week:" in body
-            assert "new\\\\_face" in body
-            assert "@returning" not in body
-
-    @responses.activate
     def test_summary_includes_longest_streak(self, db, global_group, group):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
