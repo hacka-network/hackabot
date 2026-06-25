@@ -122,6 +122,40 @@ def verify_webhook():
         return False
 
 
+# Telegram rejects messages over 4096 chars; leave headroom for the extra
+# UTF-16 units that emoji cost.
+TELEGRAM_MAX_MESSAGE_LENGTH = 4000
+
+
+def _split_message(text, limit=TELEGRAM_MAX_MESSAGE_LENGTH):
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    current = ""
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if not current:
+            current = line
+        elif len(current) + 1 + len(line) <= limit:
+            current = f"{current}\n{line}"
+        else:
+            chunks.append(current)
+            current = line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def send_long(chat_id, text):
+    for chunk in _split_message(text):
+        send(chat_id, chunk)
+
+
 def send(chat_id, text):
     print(f"📤 Calling Telegram API: sendMessage to chat {chat_id}")
     print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")

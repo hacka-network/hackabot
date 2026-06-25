@@ -12,6 +12,7 @@ from hackabot.apps.bot.models import (
     Poll,
     PollAnswer,
 )
+from hackabot.apps.bot.telegram import TELEGRAM_MAX_MESSAGE_LENGTH
 
 TEST_WEBHOOK_SECRET = "test-webhook-secret-123"
 
@@ -2032,7 +2033,7 @@ class TestPeopleCommand:
     def test_people_command_shows_public_people(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
-            "hackabot.apps.bot.views.send",
+            "hackabot.apps.bot.views.send_long",
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
@@ -2068,7 +2069,7 @@ class TestPeopleCommand:
     ):
         sent_messages = []
         monkeypatch.setattr(
-            "hackabot.apps.bot.views.send",
+            "hackabot.apps.bot.views.send_long",
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
@@ -2098,7 +2099,7 @@ class TestPeopleCommand:
     def test_people_command_includes_self(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
-            "hackabot.apps.bot.views.send",
+            "hackabot.apps.bot.views.send_long",
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
@@ -2125,7 +2126,7 @@ class TestPeopleCommand:
     ):
         sent_messages = []
         monkeypatch.setattr(
-            "hackabot.apps.bot.views.send",
+            "hackabot.apps.bot.views.send_long",
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
@@ -2154,7 +2155,7 @@ class TestPeopleCommand:
     def test_people_command_multiple_nodes(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
-            "hackabot.apps.bot.views.send",
+            "hackabot.apps.bot.views.send_long",
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
@@ -2198,7 +2199,7 @@ class TestPeopleCommand:
     def test_people_command_shows_footer(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
-            "hackabot.apps.bot.views.send",
+            "hackabot.apps.bot.views.send_long",
             lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
@@ -2216,6 +2217,40 @@ class TestPeopleCommand:
         assert response.status_code == 200
         text = sent_messages[0][1]
         assert "privacy mode OFF" in text
+
+    def test_people_command_splits_long_roster(self, client, db, monkeypatch):
+        chunks = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.telegram.send",
+            lambda chat_id, text: chunks.append(text),
+        )
+
+        alice = Person.objects.create(
+            telegram_id=12345, first_name="Alice", username="alice"
+        )
+        group = Group.objects.create(
+            telegram_id=-100123, display_name="Test Group"
+        )
+        Node.objects.create(group=group, name="London", emoji="🇬🇧")
+        GroupPerson.objects.create(group=group, person=alice, left=False)
+
+        for i in range(100):
+            person = Person.objects.create(
+                telegram_id=20000 + i,
+                first_name=f"Person{i:03d}",
+                privacy=False,
+                bio="x" * 140,
+            )
+            GroupPerson.objects.create(group=group, person=person, left=False)
+
+        response = post_webhook(client, self._make_dm("/people"))
+
+        assert response.status_code == 200
+        assert len(chunks) >= 2
+        assert all(len(c) <= TELEGRAM_MAX_MESSAGE_LENGTH for c in chunks)
+        joined = "\n".join(chunks)
+        assert "Person000" in joined
+        assert "Person099" in joined
 
     def test_help_shows_people_command(self, client, db, monkeypatch):
         sent_messages = []
@@ -2575,22 +2610,16 @@ class TestRulesCommand:
             },
         }
 
-    def test_rules_command_in_global_chat(
-        self, client, db, monkeypatch
-    ):
+    def test_rules_command_in_global_chat(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
         response = post_webhook(
             client,
-            self._make_group_message(
-                "/rules", chat_id=self.GLOBAL_CHAT_ID
-            ),
+            self._make_group_message("/rules", chat_id=self.GLOBAL_CHAT_ID),
         )
 
         assert response.status_code == 200
@@ -2599,15 +2628,11 @@ class TestRulesCommand:
         assert "rules/guidelines" in sent_messages[0][1]
         assert "chat-rules.md" in sent_messages[0][1]
 
-    def test_rules_command_in_reply(
-        self, client, db, monkeypatch
-    ):
+    def test_rules_command_in_reply(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
         response = post_webhook(
@@ -2628,16 +2653,12 @@ class TestRulesCommand:
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
 
         response = post_webhook(
             client,
-            self._make_group_message(
-                "/rules", chat_id=-1001234567890
-            ),
+            self._make_group_message("/rules", chat_id=-1001234567890),
         )
 
         assert response.status_code == 200
@@ -2647,9 +2668,7 @@ class TestRulesCommand:
 class TestTimeoutCommand:
     GLOBAL_CHAT_ID = -1002257954378
 
-    def _make_group_message(
-        self, text, chat_id=-1001234567890, user_id=12345
-    ):
+    def _make_group_message(self, text, chat_id=-1001234567890, user_id=12345):
         return {
             "update_id": 1001,
             "message": {
@@ -2670,9 +2689,7 @@ class TestTimeoutCommand:
             },
         }
 
-    def test_timeout_restricts_user(
-        self, client, db, monkeypatch
-    ):
+    def test_timeout_restricts_user(self, client, db, monkeypatch):
         Person.objects.create(
             telegram_id=99999,
             first_name="Bob",
@@ -2682,9 +2699,7 @@ class TestTimeoutCommand:
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.is_chat_admin",
@@ -2693,9 +2708,7 @@ class TestTimeoutCommand:
         restrictions = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.restrict_chat_member",
-            lambda cid, uid, until: restrictions.append(
-                (cid, uid, until)
-            ),
+            lambda cid, uid, until: restrictions.append((cid, uid, until)),
         )
 
         response = post_webhook(
@@ -2714,9 +2727,7 @@ class TestTimeoutCommand:
         assert "restricted for 24 hours" in sent_messages[0][1]
         assert "chat-rules.md" in sent_messages[0][1]
 
-    def test_timeout_without_at_sign(
-        self, client, db, monkeypatch
-    ):
+    def test_timeout_without_at_sign(self, client, db, monkeypatch):
         Person.objects.create(
             telegram_id=99999,
             first_name="Bob",
@@ -2726,9 +2737,7 @@ class TestTimeoutCommand:
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.is_chat_admin",
@@ -2737,9 +2746,7 @@ class TestTimeoutCommand:
         restrictions = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.restrict_chat_member",
-            lambda cid, uid, until: restrictions.append(
-                (cid, uid, until)
-            ),
+            lambda cid, uid, until: restrictions.append((cid, uid, until)),
         )
 
         response = post_webhook(
@@ -2754,15 +2761,11 @@ class TestTimeoutCommand:
         assert len(restrictions) == 1
         assert restrictions[0][1] == 99999
 
-    def test_timeout_non_admin_rejected(
-        self, client, db, monkeypatch
-    ):
+    def test_timeout_non_admin_rejected(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.is_chat_admin",
@@ -2781,15 +2784,11 @@ class TestTimeoutCommand:
         assert len(sent_messages) == 1
         assert "Only admins" in sent_messages[0][1]
 
-    def test_timeout_unknown_user(
-        self, client, db, monkeypatch
-    ):
+    def test_timeout_unknown_user(self, client, db, monkeypatch):
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.is_chat_admin",
@@ -2808,9 +2807,7 @@ class TestTimeoutCommand:
         assert len(sent_messages) == 1
         assert "Could not find" in sent_messages[0][1]
 
-    def test_timeout_ignored_in_other_chats(
-        self, client, db, monkeypatch
-    ):
+    def test_timeout_ignored_in_other_chats(self, client, db, monkeypatch):
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
             lambda chat_id, text: None,
@@ -2822,9 +2819,7 @@ class TestTimeoutCommand:
         restrictions = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.restrict_chat_member",
-            lambda cid, uid, until: restrictions.append(
-                (cid, uid, until)
-            ),
+            lambda cid, uid, until: restrictions.append((cid, uid, until)),
         )
 
         response = post_webhook(

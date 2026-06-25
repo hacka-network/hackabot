@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import time
 from unittest.mock import patch
@@ -9,9 +10,12 @@ from hackabot.apps.bot.models import Event, Poll
 from hackabot.apps.bot.telegram import (
     ALLOWED_UPDATES,
     TELEGRAM_API_BASE,
+    TELEGRAM_MAX_MESSAGE_LENGTH,
     _get_bot_token,
+    _split_message,
     send,
     send_event_reminder,
+    send_long,
     send_poll,
     verify_webhook,
 )
@@ -239,6 +243,86 @@ class TestSend:
 
             with pytest.raises(requests.HTTPError):
                 send(12345, "Hello!")
+
+
+class TestSplitMessage:
+    def test_short_message_single_chunk(self):
+        assert _split_message("hello") == ["hello"]
+
+    def test_message_at_limit_not_split(self):
+        text = "a" * TELEGRAM_MAX_MESSAGE_LENGTH
+        assert _split_message(text) == [text]
+
+    def test_splits_on_newline_boundaries(self):
+        line = "x" * 1500
+        text = "\n".join([line, line, line])
+        chunks = _split_message(text)
+        assert len(chunks) == 2
+        assert all(len(c) <= TELEGRAM_MAX_MESSAGE_LENGTH for c in chunks)
+        assert chunks[0] == f"{line}\n{line}"
+        assert chunks[1] == line
+
+    def test_never_breaks_a_line_when_splitting_on_newlines(self):
+        line = "x" * 1500
+        text = "\n".join([line] * 4)
+        chunks = _split_message(text)
+        for chunk in chunks:
+            for piece in chunk.split("\n"):
+                assert piece == line
+
+    def test_hard_splits_an_overlong_single_line(self):
+        text = "y" * 9000
+        chunks = _split_message(text)
+        assert len(chunks) == 3
+        assert all(len(c) <= TELEGRAM_MAX_MESSAGE_LENGTH for c in chunks)
+        assert "".join(chunks) == text
+
+    def test_respects_a_custom_limit(self):
+        chunks = _split_message("ab\ncd\nef", limit=5)
+        assert chunks == ["ab\ncd", "ef"]
+
+
+class TestSendLong:
+    @responses.activate
+    def test_short_message_sends_one_call(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1}},
+                status=200,
+            )
+
+            send_long(12345, "short message")
+
+            assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_long_message_split_into_multiple_calls(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1}},
+                status=200,
+            )
+
+            line = "x" * 1500
+            send_long(12345, "\n".join([line] * 4))
+
+            assert len(responses.calls) == 2
+            for call in responses.calls:
+                body = json.loads(call.request.body)
+                assert len(body["text"]) <= TELEGRAM_MAX_MESSAGE_LENGTH
+                assert body["parse_mode"] == "Markdown"
 
 
 class TestSendPoll:

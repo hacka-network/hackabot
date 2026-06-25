@@ -31,6 +31,7 @@ from .telegram import (
     restrict_chat_member,
     send,
     send_chat_action,
+    send_long,
     verify_webhook_secret,
 )
 
@@ -242,10 +243,7 @@ def _handle_timeout_command(chat_id, message_data):
         )
         return
 
-    until = int(
-        (datetime.now(timezone.utc) + timedelta(hours=24))
-        .timestamp()
-    )
+    until = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
     restrict_chat_member(chat_id, person.telegram_id, until)
 
     escaped = raw_username.replace("_", "\\_")
@@ -786,7 +784,7 @@ def _handle_people_command(chat_id, person):
         lines.append("")
 
     lines.append("_Only showing people with privacy mode OFF_")
-    send(chat_id, "\n".join(lines))
+    send_long(chat_id, "\n".join(lines))
 
 
 def _handle_bio_command(chat_id, person, text):
