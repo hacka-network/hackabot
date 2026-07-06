@@ -145,3 +145,11 @@ if SENTRY_DSN and not is_shell:
         integrations=[DjangoIntegration()],
         send_default_pii=False,
     )
+
+# Node roster sync (nodes.json lives in the hacka.network site repo)
+NODES_JSON_URL = os.environ.get(
+    "NODES_JSON_URL",
+    "https://raw.githubusercontent.com/hacka-network/"
+    "hacka.network/main/nodes.json",
+)
+GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")

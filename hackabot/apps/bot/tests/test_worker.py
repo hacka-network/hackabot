@@ -41,6 +41,17 @@ from hackabot.apps.worker.run import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _stub_node_sync(monkeypatch):
+    monkeypatch.setattr(
+        "hackabot.apps.worker.run.sync_nodes_from_url",
+        lambda *args, **kwargs: dict(aborted=False),
+    )
+    monkeypatch.setattr(
+        "hackabot.apps.worker.run._last_node_sync_at", None
+    )
+
+
 class TestShouldSendPoll:
     def test_returns_true_on_monday_at_correct_time(self, node):
         monday_7am_utc = arrow.Arrow(2024, 1, 8, 7, 0, 0, tzinfo="UTC")

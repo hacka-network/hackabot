@@ -7,6 +7,7 @@ from hackabot.apps.bot.views import (
     api_nodes,
     api_photo_image,
     api_recent_photos,
+    github_webhook,
     telegram_webhook,
 )
 
@@ -14,6 +15,7 @@ urlpatterns = [
     path("", RedirectView.as_view(url="https://hacka.network")),
     path("admin/", admin.site.urls),
     path("webhook/telegram/", telegram_webhook, name="telegram_webhook"),
+    path("webhook/github/", github_webhook, name="github_webhook"),
     path("api/nodes/", api_nodes, name="api_nodes"),
     path(
         "api/nodes/<str:node_slug>/",

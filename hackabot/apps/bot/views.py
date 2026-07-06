@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import html
 import json
 import re
@@ -23,6 +25,7 @@ from .models import (
     Poll,
     PollAnswer,
 )
+from .node_sync import sync_nodes_from_url
 from .telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
     answer_callback_query,
@@ -1052,6 +1055,44 @@ def _get_last_attending_count(node):
         poll__created__lt=window_end,
         yes=True,
     ).count()
+
+
+def _verify_github_signature(request):
+    secret = settings.GITHUB_WEBHOOK_SECRET
+    if not secret:
+        return False
+    header = request.headers.get("X-Hub-Signature-256", "")
+    if not header.startswith("sha256="):
+        return False
+    digest = hmac.new(
+        secret.encode(), request.body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(f"sha256={digest}", header)
+
+
+@csrf_exempt
+@require_POST
+def github_webhook(request):
+    if not _verify_github_signature(request):
+        return HttpResponse(status=403)
+
+    event = request.headers.get("X-GitHub-Event", "")
+    if event == "ping":
+        return JsonResponse(dict(ok=True))
+    if event != "push":
+        return JsonResponse(dict(ok=True, skipped="not a push"))
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return HttpResponse(status=400)
+
+    ref = data.get("ref", "")
+    if ref != "refs/heads/main":
+        return JsonResponse(dict(ok=True, skipped=f"ref {ref}"))
+
+    summary = sync_nodes_from_url()
+    return JsonResponse(dict(ok=True, summary=summary))
 
 
 def _cors_response(response):

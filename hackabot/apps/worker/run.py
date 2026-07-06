@@ -7,6 +7,7 @@ import sentry_sdk
 from django.db import close_old_connections
 from django.utils import timezone
 
+from hackabot.apps.bot.node_sync import sync_nodes_from_url
 from hackabot.apps.bot.telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
     send_event_reminder,
@@ -37,6 +38,9 @@ YEARLY_SUMMARY_DAY = 31
 YEARLY_SUMMARY_HOUR = 12
 CLEANUP_HOUR = 0
 MAX_PHOTOS = 100
+NODE_SYNC_INTERVAL_SECONDS = 300
+
+_last_node_sync_at = None
 
 
 def get_event_day_name(node):
@@ -264,10 +268,25 @@ def process_photo_cleanup(now_utc):
     print(f"🗑️ Cleaned up {deleted} old photos")
 
 
+def process_node_sync(now_utc):
+    global _last_node_sync_at
+
+    if _last_node_sync_at is not None:
+        elapsed = (now_utc - _last_node_sync_at).total_seconds()
+        if elapsed < NODE_SYNC_INTERVAL_SECONDS:
+            return
+
+    _last_node_sync_at = now_utc
+    summary = sync_nodes_from_url()
+    print(f"🔄 Node sync result: {summary}")
+
+
 def check_all_nodes():
     from hackabot.apps.bot.models import Node
 
     now_utc = arrow.now(POLL_TIMEZONE)
+
+    process_node_sync(now_utc)
 
     nodes = Node.objects.filter(
         group__isnull=False, disabled=False
