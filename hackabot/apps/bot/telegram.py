@@ -227,19 +227,6 @@ def export_chat_invite_link(chat_id):
     return result.get("result")
 
 
-def get_chat_invite_link(chat_id):
-    print(f"📤 Calling Telegram API: getChat for chat {chat_id}")
-    token = _get_bot_token()
-    url = f"{TELEGRAM_API_BASE}/{token}/getChat"
-    resp = requests.get(
-        url,
-        params=dict(chat_id=chat_id),
-        timeout=REQUEST_TIMEOUT,
-    )
-    _raise_for_status(resp)
-    return resp.json().get("result", {}).get("invite_link")
-
-
 def approve_chat_join_request(chat_id, user_id):
     print(
         f"📤 Calling Telegram API: approveChatJoinRequest for {user_id}"
@@ -689,21 +676,15 @@ def send_weekly_attendance_summary():
     send(global_group.telegram_id, message)
     print("✅ Weekly attendance summary sent")
 
-    if settings.MRR_10K_CHAT_ID:
-        try:
-            invite_link = get_chat_invite_link(settings.MRR_10K_CHAT_ID)
-        except HTTPError:
-            invite_link = None
-            print("⚠️ Could not fetch MRR invite link, skipping promo")
-        if invite_link:
-            print("📤 Sending $10k MRR group promo after weekly summary")
-            send(
-                global_group.telegram_id,
-                "🏦 We have a private $10k+ MRR group. Join with this"
-                " link and the bot will message you to verify:"
-                f" {invite_link}",
-                parse_mode=None,
-            )
+    if settings.MRR_10K_INVITE_LINK:
+        print("📤 Sending $10k MRR group promo after weekly summary")
+        send(
+            global_group.telegram_id,
+            "🏦 We have a private $10k+ MRR group. Join with this"
+            " link and the bot will message you to verify:"
+            f" {settings.MRR_10K_INVITE_LINK}",
+            parse_mode=None,
+        )
 
     return True
 

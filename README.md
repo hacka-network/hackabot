@@ -85,8 +85,9 @@ link creates a join request instead of admitting directly:
    too
 
 The group is also promoted to the global group right after the weekly
-network stats. The bot fetches the group's invite link itself (via
-`getChat`), so no extra config is needed beyond `MRR_10K_CHAT_ID`.
+network stats. Set `MRR_10K_INVITE_LINK` to the group's request-to-join
+link (the "Request Admin Approval" one, not a direct-join link) to
+enable the promo; while unset, nothing is posted.
 
 Verification uses an unofficial Stripe endpoint
 (`api.stripe.com/v2/xauth_/shareable_metrics/...`); if it ever breaks,
@@ -140,6 +141,7 @@ heroku config:set HACKABOT_ENV=production \
     SENTRY_DSN=your_sentry_dsn \
     MRR_10K_CHAT_ID=your_gated_group_chat_id \
     MRR_ADMIN_CHAT_ID=your_admin_group_chat_id \
+    MRR_10K_INVITE_LINK=your_gated_group_request_to_join_link \
     PGBOUNCER_DEFAULT_POOL_SIZE=10 PGBOUNCER_RESERVE_POOL_SIZE=5 \
     PGBOUNCER_MAX_CLIENT_CONN=500 \
     PGBOUNCER_LOG_CONNECTIONS=0 PGBOUNCER_LOG_DISCONNECTIONS=0

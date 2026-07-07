@@ -1301,10 +1301,10 @@ class TestWeeklySummaryMessage:
             assert "(3 attendances in a row!)" in body
 
     @responses.activate
-    def test_summary_promotes_mrr_group_when_configured(
+    def test_summary_promotes_mrr_group_when_link_set(
         self, db, global_group, settings
     ):
-        settings.MRR_10K_CHAT_ID = -1009999000
+        settings.MRR_10K_INVITE_LINK = "https://t.me/+abc_DEF-123"
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -1336,33 +1336,20 @@ class TestWeeklySummaryMessage:
                 json={"ok": True, "result": {"message_id": 1001}},
                 status=200,
             )
-            responses.add(
-                responses.GET,
-                f"{TELEGRAM_API_BASE}/bottesttoken/getChat",
-                json={
-                    "ok": True,
-                    "result": {"invite_link": "https://t.me/+abc_DEF-123"},
-                },
-                status=200,
-            )
 
             friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
             process_weekly_summary(friday_3am_utc)
 
-            posts = [
-                c.request.body.decode()
-                for c in responses.calls
-                if c.request.method == "POST"
-            ]
-            promo = [b for b in posts if "$10k+ MRR group" in b]
-            assert len(promo) == 1
-            assert "https://t.me/+abc_DEF-123" in promo[0]
-            assert "parse_mode" not in promo[0]
+            assert len(responses.calls) == 2
+            promo_body = responses.calls[1].request.body.decode()
+            assert "private $10k+ MRR group" in promo_body
+            assert "https://t.me/+abc_DEF-123" in promo_body
+            assert "parse_mode" not in promo_body
 
-    def test_summary_skips_mrr_promo_when_group_unset(
+    def test_summary_skips_mrr_promo_when_link_unset(
         self, db, global_group, settings
     ):
-        settings.MRR_10K_CHAT_ID = 0
+        settings.MRR_10K_INVITE_LINK = ""
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 

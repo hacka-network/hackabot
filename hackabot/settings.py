@@ -157,3 +157,5 @@ GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 # MRR-gated groups (0 = feature disabled)
 MRR_10K_CHAT_ID = int(os.environ.get("MRR_10K_CHAT_ID", 0))
 MRR_ADMIN_CHAT_ID = int(os.environ.get("MRR_ADMIN_CHAT_ID", 0))
+# Request-to-join invite link promoted in the weekly summary
+MRR_10K_INVITE_LINK = os.environ.get("MRR_10K_INVITE_LINK", "")
