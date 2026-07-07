@@ -197,6 +197,7 @@ def send_with_keyboard(chat_id, text, keyboard):
     print(f"📥 sendMessage response: {resp.text}")
     _raise_for_status(resp)
     print("✅ Message with keyboard sent successfully")
+    return resp.json().get("result", {}).get("message_id")
 
 
 def answer_callback_query(callback_query_id, text=None):
@@ -261,26 +262,41 @@ def decline_chat_join_request(chat_id, user_id):
     print("✅ Join request declined")
 
 
-def copy_message(chat_id, from_chat_id, message_id, caption, keyboard):
+def copy_message(chat_id, from_chat_id, message_id, caption, keyboard=None):
     print(
         f"📤 Calling Telegram API: copyMessage {message_id} from"
         f" {from_chat_id} to {chat_id}"
     )
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/copyMessage"
+    payload = dict(
+        chat_id=chat_id,
+        from_chat_id=from_chat_id,
+        message_id=message_id,
+        caption=caption,
+        parse_mode="Markdown",
+    )
+    if keyboard:
+        payload["reply_markup"] = dict(inline_keyboard=keyboard)
+    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+    print(f"📥 copyMessage response: {resp.text}")
+    _raise_for_status(resp)
+    return resp.json().get("result", {}).get("message_id")
+
+
+def edit_message_remove_keyboard(chat_id, message_id):
+    print(
+        f"📤 Calling Telegram API: editMessageReplyMarkup (clear) for"
+        f" {message_id} in chat {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/editMessageReplyMarkup"
     resp = requests.post(
         url,
-        json=dict(
-            chat_id=chat_id,
-            from_chat_id=from_chat_id,
-            message_id=message_id,
-            caption=caption,
-            parse_mode="Markdown",
-            reply_markup=dict(inline_keyboard=keyboard),
-        ),
+        json=dict(chat_id=chat_id, message_id=message_id),
         timeout=REQUEST_TIMEOUT,
     )
-    print(f"📥 copyMessage response: {resp.text}")
+    print(f"📥 editMessageReplyMarkup response: {resp.text}")
     _raise_for_status(resp)
 
 

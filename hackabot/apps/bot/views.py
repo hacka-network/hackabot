@@ -37,6 +37,7 @@ from .telegram import (
     copy_message,
     decline_chat_join_request,
     download_file,
+    edit_message_remove_keyboard,
     is_chat_admin,
     restrict_chat_member,
     send,
@@ -47,6 +48,7 @@ from .telegram import (
 )
 
 BIO_MAX_LENGTH = 140
+PROOF_WINDOW_SECONDS = 15
 
 if settings.IS_PRODUCTION:
     PHOTO_UPLOAD_CHAT_ID = -1002257954378
@@ -562,11 +564,19 @@ def _handle_dm(message_data):
     print(f"📩 DM from {person.first_name}: {text[:50]}...")
 
     join_request = JoinRequest.objects.filter(
-        person=person, status=JoinRequest.STATUS_PENDING
+        person=person,
+        status__in=[
+            JoinRequest.STATUS_PENDING,
+            JoinRequest.STATUS_REVIEW,
+        ],
     ).first()
-    if join_request:
+    if join_request and join_request.status == JoinRequest.STATUS_PENDING:
         print("📩 DM is proof for a pending join request")
         _handle_join_request_proof(message_data, join_request)
+        return
+    if join_request and _within_proof_window(join_request):
+        print("📩 DM is extra proof for a join request under review")
+        _handle_additional_proof(message_data, join_request)
         return
 
     is_member_of_any_node = Node.objects.filter(
@@ -925,6 +935,8 @@ def _handle_chat_join_request(join_request_data):
             status=JoinRequest.STATUS_PENDING,
             proof_text="",
             reason="",
+            proof_started_at=None,
+            admin_message_id=None,
         ),
     )
     print(f"🚪 Join request #{join_request.id} pending for {person}")
@@ -960,7 +972,65 @@ def _notify_requester(chat_id, text):
         print(f"⚠️ Could not DM requester {chat_id}")
 
 
+def _remove_card_buttons(chat_id, message_id):
+    if not chat_id or not message_id:
+        return
+    try:
+        edit_message_remove_keyboard(chat_id, message_id)
+    except HTTPError:
+        print(f"⚠️ Could not clear buttons on message {message_id}")
+
+
+def _within_proof_window(join_request):
+    if not join_request.proof_started_at:
+        return False
+    elapsed = django_timezone.now() - join_request.proof_started_at
+    return elapsed.total_seconds() <= PROOF_WINDOW_SECONDS
+
+
+def _media_message_id(message_data):
+    has_media = any(
+        key in message_data
+        for key in [
+            "photo",
+            "video",
+            "document",
+            "animation",
+            "video_note",
+        ]
+    )
+    if has_media:
+        return message_data.get("message_id")
+    return None
+
+
+def _handle_additional_proof(message_data, join_request):
+    if not settings.MRR_ADMIN_CHAT_ID:
+        return
+    chat_id = message_data["chat"]["id"]
+    text = (
+        message_data.get("text") or message_data.get("caption") or ""
+    ).strip()
+    media_id = _media_message_id(message_data)
+    person = join_request.person
+    header = (
+        f"➕ More from {_md_escape(str(person))}"
+        f" (request #{join_request.id})"
+    )
+    try:
+        if media_id:
+            copy_message(settings.MRR_ADMIN_CHAT_ID, chat_id, media_id, header)
+        elif text:
+            send(
+                settings.MRR_ADMIN_CHAT_ID,
+                f"{header}\n\n{_md_escape(text)}",
+            )
+    except HTTPError:
+        print(f"⚠️ Could not forward extra proof for #{join_request.id}")
+
+
 def _handle_join_request_proof(message_data, join_request):
+    join_request.proof_started_at = django_timezone.now()
     chat_id = message_data["chat"]["id"]
     message_id = message_data.get("message_id")
     text = (
@@ -1077,31 +1147,40 @@ def _send_join_request_review(
         f"{header}\n\nTheir message:"
         f"\n{_md_escape(join_request.proof_text)}"
     )
+    admin_msg_id = None
     try:
         if has_media and from_chat_id and message_id:
             try:
-                copy_message(
+                admin_msg_id = copy_message(
                     settings.MRR_ADMIN_CHAT_ID,
                     from_chat_id,
                     message_id,
                     f"{header}\n\nTheir proof is attached.",
                     keyboard,
                 )
-                return
             except HTTPError:
                 print(
                     f"⚠️ Media copy failed for join request"
                     f" #{join_request.id}, sending text card"
                 )
-        send_with_keyboard(settings.MRR_ADMIN_CHAT_ID, text_body, keyboard)
+        if admin_msg_id is None:
+            admin_msg_id = send_with_keyboard(
+                settings.MRR_ADMIN_CHAT_ID, text_body, keyboard
+            )
     except HTTPError:
         print(
             f"⚠️ Could not notify admins for join request"
             f" #{join_request.id}"
         )
 
+    if admin_msg_id:
+        join_request.admin_message_id = admin_msg_id
+        join_request.save(update_fields=["admin_message_id"])
 
-def _handle_join_request_callback(callback_query_id, callback_data):
+
+def _handle_join_request_callback(
+    callback_query_id, callback_data, chat_id, message_id
+):
     action, _, request_id = callback_data.partition(":")
     join_request = JoinRequest.objects.filter(id=request_id).first()
     if not join_request:
@@ -1114,6 +1193,7 @@ def _handle_join_request_callback(callback_query_id, callback_data):
         answer_callback_query(
             callback_query_id, f"Already {join_request.status}."
         )
+        _remove_card_buttons(chat_id, message_id)
         return
 
     person = join_request.person
@@ -1130,6 +1210,7 @@ def _handle_join_request_callback(callback_query_id, callback_data):
         join_request.proof_text = ""
         join_request.save()
         answer_callback_query(callback_query_id, "Approved ✅")
+        _remove_card_buttons(chat_id, message_id)
         _notify_requester(
             person.telegram_id,
             "🎉 You've been approved! Welcome to the $10k MRR group.",
@@ -1147,6 +1228,7 @@ def _handle_join_request_callback(callback_query_id, callback_data):
         join_request.proof_text = ""
         join_request.save()
         answer_callback_query(callback_query_id, "Declined ❌")
+        _remove_card_buttons(chat_id, message_id)
         _notify_requester(
             person.telegram_id,
             "😔 Sorry, your request to join the $10k MRR group was"
@@ -1159,7 +1241,9 @@ def _handle_callback_query(callback_query_data):
     print("🔘 Handling callback query...")
     callback_query_id = callback_query_data.get("id")
     callback_data = callback_query_data.get("data", "")
-    chat_id = callback_query_data.get("message", {}).get("chat", {}).get("id")
+    message = callback_query_data.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
+    message_id = message.get("message_id")
 
     if not callback_query_id or not chat_id:
         print("⚠️ Missing callback_query_id or chat_id, skipping")
@@ -1171,7 +1255,9 @@ def _handle_callback_query(callback_query_data):
     #     _handle_node_invite_callback(callback_query_id, chat_id, node_slug)
     if callback_data.startswith(("jr_approve:", "jr_decline:")):
         print(f"🔘 Processing join request callback: {callback_data}")
-        _handle_join_request_callback(callback_query_id, callback_data)
+        _handle_join_request_callback(
+            callback_query_id, callback_data, chat_id, message_id
+        )
     else:
         print(f"⚠️ Unknown callback_data: {callback_data}")
         answer_callback_query(callback_query_id)

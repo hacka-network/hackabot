@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import pytest
 import responses
 from django.test import Client
+from django.utils import timezone as django_timezone
 from requests import HTTPError
 
 from hackabot.apps.bot.models import JoinRequest, Person
@@ -56,11 +57,26 @@ def sent_messages(monkeypatch):
 @pytest.fixture
 def sent_keyboards(monkeypatch):
     sent = []
+
+    def fake_send_with_keyboard(chat_id, text, keyboard):
+        sent.append((chat_id, text, keyboard))
+        return 999
+
     monkeypatch.setattr(
         "hackabot.apps.bot.views.send_with_keyboard",
-        lambda chat_id, text, keyboard: sent.append((chat_id, text, keyboard)),
+        fake_send_with_keyboard,
     )
     return sent
+
+
+@pytest.fixture(autouse=True)
+def cleared_buttons(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "hackabot.apps.bot.views.edit_message_remove_keyboard",
+        lambda chat_id, message_id: calls.append((chat_id, message_id)),
+    )
+    return calls
 
 
 @pytest.fixture
@@ -99,8 +115,9 @@ def declined(monkeypatch):
 def copied(monkeypatch):
     calls = []
 
-    def fake_copy(chat_id, from_chat_id, message_id, caption, keyboard):
+    def fake_copy(chat_id, from_chat_id, message_id, caption, keyboard=None):
         calls.append((chat_id, from_chat_id, message_id, caption, keyboard))
+        return 888
 
     monkeypatch.setattr("hackabot.apps.bot.views.copy_message", fake_copy)
     return calls
@@ -429,6 +446,50 @@ class TestProofDM:
         assert JoinRequest.objects.count() == 0
         assert "hacka.network" in sent_messages[0][1]
 
+    def test_extra_proof_within_window_forwarded(
+        self, client, db, sent_messages, copied
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_REVIEW,
+            proof_started_at=django_timezone.now(),
+        )
+
+        post_webhook(
+            client, photo_dm_update(caption="another pic", message_id=43)
+        )
+
+        assert len(copied) == 1
+        chat_id, from_chat_id, message_id, caption, keyboard = copied[0]
+        assert chat_id == ADMIN_CHAT_ID
+        assert from_chat_id == 555
+        assert message_id == 43
+        assert keyboard is None
+
+    def test_extra_proof_after_window_ignored(
+        self, client, db, sent_messages, copied
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_REVIEW,
+            proof_started_at=(django_timezone.now() - timedelta(seconds=30)),
+        )
+
+        post_webhook(
+            client, photo_dm_update(caption="late pic", message_id=44)
+        )
+
+        assert copied == []
+        assert "hacka.network" in sent_messages[0][1]
+
 
 class TestAdminCallbacks:
     def test_approve_callback(
@@ -447,6 +508,23 @@ class TestAdminCallbacks:
         assert answered_callbacks == [("cb1", "Approved ✅")]
         assert sent_messages[0][0] == 555
         assert "approved" in sent_messages[0][1]
+
+    def test_approve_removes_card_buttons(
+        self,
+        client,
+        db,
+        sent_messages,
+        answered_callbacks,
+        approved,
+        cleared_buttons,
+    ):
+        join_request = pending_request()
+        join_request.status = JoinRequest.STATUS_REVIEW
+        join_request.save()
+
+        post_webhook(client, callback_update(f"jr_approve:{join_request.id}"))
+
+        assert cleared_buttons == [(ADMIN_CHAT_ID, 20)]
 
     def test_decline_callback(
         self, client, db, sent_messages, answered_callbacks, declined
