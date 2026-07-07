@@ -63,7 +63,7 @@ def extract_stripe_link(text):
 
 def verify_mrr(slug, token):
     url = SHAREABLE_METRICS_URL.format(slug=slug, token=token)
-    print(f"📈 Fetching Stripe shareable metrics: {url}")
+    print(f"📈 Fetching Stripe shareable metrics for {slug}")
     try:
         resp = requests.get(
             url,

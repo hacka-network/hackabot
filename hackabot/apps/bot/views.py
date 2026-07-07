@@ -31,8 +31,10 @@ from .node_sync import sync_nodes_from_url
 from .stripe_mrr import extract_stripe_link, verify_mrr
 from .telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
+    _md_escape,
     answer_callback_query,
     approve_chat_join_request,
+    copy_message,
     decline_chat_join_request,
     download_file,
     is_chat_admin,
@@ -564,7 +566,7 @@ def _handle_dm(message_data):
     ).first()
     if join_request:
         print("📩 DM is proof for a pending join request")
-        _handle_join_request_proof(chat_id, join_request, text)
+        _handle_join_request_proof(message_data, join_request)
         return
 
     is_member_of_any_node = Node.objects.filter(
@@ -926,29 +928,66 @@ def _handle_chat_join_request(join_request_data):
         ),
     )
     print(f"🚪 Join request #{join_request.id} pending for {person}")
-    send(
-        person.telegram_id,
-        "👋 Hey! You've requested to join the *$10k MRR* group.\n\n"
-        "To verify your MRR, please reply with a link to your public"
-        " Stripe MRR chart (create one from your Stripe dashboard"
-        " chart via Share).\n\n"
-        "It looks like: https://profile.stripe.com/yourcompany/AbC123\n\n"
-        "No Stripe? Reply with other proof and an admin will review"
-        " it manually.\n\n"
-        "_We don't save your revenue data — it's only used to"
-        " evaluate your request to join the group. You can delete"
-        " the shared link afterwards from your Stripe dashboard"
-        " under Settings → Stripe Profiles._",
+    user_chat_id = join_request_data.get("user_chat_id") or person.telegram_id
+    try:
+        send(
+            user_chat_id,
+            "👋 Hey! You've requested to join the *$10k MRR* group.\n\n"
+            "To verify your MRR, please reply with a link to your public"
+            " Stripe MRR chart (create one from your Stripe dashboard"
+            " chart via Share).\n\n"
+            "It looks like: https://profile.stripe.com/yourcompany/AbC123"
+            "\n\n"
+            "No Stripe? Send a screenshot or short video of your revenue"
+            " dashboard and an admin will review it.\n\n"
+            "_We don't save your revenue data, it's only used to"
+            " evaluate your request to join the group. You can delete"
+            " the shared link afterwards from your Stripe dashboard"
+            " under Settings → Stripe Profiles._",
+        )
+    except HTTPError:
+        print("⚠️ Could not DM requester, routing to admin review")
+        _send_join_request_review(
+            join_request,
+            "couldn't DM the requester (they may not have started" " the bot)",
+        )
+
+
+def _notify_requester(chat_id, text):
+    try:
+        send(chat_id, text)
+    except HTTPError:
+        print(f"⚠️ Could not DM requester {chat_id}")
+
+
+def _handle_join_request_proof(message_data, join_request):
+    chat_id = message_data["chat"]["id"]
+    message_id = message_data.get("message_id")
+    text = (
+        message_data.get("text") or message_data.get("caption") or ""
+    ).strip()
+    has_media = any(
+        key in message_data
+        for key in [
+            "photo",
+            "video",
+            "document",
+            "animation",
+            "video_note",
+        ]
     )
-
-
-def _handle_join_request_proof(chat_id, join_request, text):
     join_request.proof_text = text
 
     link = extract_stripe_link(text)
     if not link:
-        _send_join_request_review(join_request, "no Stripe link in reply")
-        send(
+        _send_join_request_review(
+            join_request,
+            "no Stripe link in reply",
+            from_chat_id=chat_id,
+            message_id=message_id,
+            has_media=has_media,
+        )
+        _notify_requester(
             chat_id,
             "🙏 Thanks! An admin will review your request and get"
             " back to you soon.",
@@ -957,8 +996,14 @@ def _handle_join_request_proof(chat_id, join_request, text):
 
     verified, reason = verify_mrr(*link)
     if not verified:
-        _send_join_request_review(join_request, reason)
-        send(
+        _send_join_request_review(
+            join_request,
+            reason,
+            from_chat_id=chat_id,
+            message_id=message_id,
+            has_media=has_media,
+        )
+        _notify_requester(
             chat_id,
             "🙏 Thanks! I couldn't verify that automatically"
             f" ({reason}), so an admin will review your request"
@@ -972,9 +1017,13 @@ def _handle_join_request_proof(chat_id, join_request, text):
         )
     except HTTPError:
         _send_join_request_review(
-            join_request, f"{reason}, but approving via Telegram failed"
+            join_request,
+            f"{reason}, but approving via Telegram failed",
+            from_chat_id=chat_id,
+            message_id=message_id,
+            has_media=has_media,
         )
-        send(
+        _notify_requester(
             chat_id,
             "🙏 Thanks! An admin will review your request and get"
             " back to you soon.",
@@ -986,10 +1035,16 @@ def _handle_join_request_proof(chat_id, join_request, text):
     join_request.proof_text = ""
     join_request.save()
     print(f"✅ Join request #{join_request.id} auto-approved: {reason}")
-    send(chat_id, "🎉 Verified! Welcome to the $10k MRR group.")
+    _notify_requester(chat_id, "🎉 Verified! Welcome to the $10k MRR group.")
 
 
-def _send_join_request_review(join_request, reason):
+def _send_join_request_review(
+    join_request,
+    reason,
+    from_chat_id=None,
+    message_id=None,
+    has_media=False,
+):
     join_request.status = JoinRequest.STATUS_REVIEW
     join_request.reason = reason
     join_request.save()
@@ -1000,23 +1055,38 @@ def _send_join_request_review(join_request, reason):
         return
 
     person = join_request.person
+    keyboard = [
+        [
+            dict(
+                text="✅ Approve",
+                callback_data=f"jr_approve:{join_request.id}",
+            ),
+            dict(
+                text="❌ Decline",
+                callback_data=f"jr_decline:{join_request.id}",
+            ),
+        ]
+    ]
+    header = (
+        f"🔎 *Join request* from {_md_escape(str(person))} for the"
+        " $10k MRR group.\n\n"
+        f"Reason for review: {_md_escape(reason)}"
+    )
+
+    if has_media and from_chat_id and message_id:
+        copy_message(
+            settings.MRR_ADMIN_CHAT_ID,
+            from_chat_id,
+            message_id,
+            f"{header}\n\nTheir proof is attached.",
+            keyboard,
+        )
+        return
+
     send_with_keyboard(
         settings.MRR_ADMIN_CHAT_ID,
-        f"🔎 *Join request* from {person} for the $10k MRR group.\n\n"
-        f"Reason for review: {reason}\n\n"
-        f"Their message:\n{join_request.proof_text}",
-        [
-            [
-                dict(
-                    text="✅ Approve",
-                    callback_data=f"jr_approve:{join_request.id}",
-                ),
-                dict(
-                    text="❌ Decline",
-                    callback_data=f"jr_decline:{join_request.id}",
-                ),
-            ]
-        ],
+        f"{header}\n\nTheir message:\n{_md_escape(join_request.proof_text)}",
+        keyboard,
     )
 
 
@@ -1049,7 +1119,7 @@ def _handle_join_request_callback(callback_query_id, callback_data):
         join_request.proof_text = ""
         join_request.save()
         answer_callback_query(callback_query_id, "Approved ✅")
-        send(
+        _notify_requester(
             person.telegram_id,
             "🎉 You've been approved! Welcome to the $10k MRR group.",
         )
@@ -1066,7 +1136,7 @@ def _handle_join_request_callback(callback_query_id, callback_data):
         join_request.proof_text = ""
         join_request.save()
         answer_callback_query(callback_query_id, "Declined ❌")
-        send(
+        _notify_requester(
             person.telegram_id,
             "😔 Sorry, your request to join the $10k MRR group was"
             " declined. If you think this is a mistake, reach out"

@@ -80,7 +80,13 @@ link creates a join request instead of admitting directly:
    automatically
 4. Otherwise (no Stripe, below threshold, or the check fails) the
    request is forwarded to the admin group with Approve/Decline
-   buttons for manual review
+   buttons for manual review. If the user replies with a screenshot
+   or video instead of a link, that media is forwarded to the admins
+   too
+
+The group is also promoted to the global group right after the weekly
+network stats. The bot fetches the group's invite link itself (via
+`getChat`), so no extra config is needed beyond `MRR_10K_CHAT_ID`.
 
 Verification uses an unofficial Stripe endpoint
 (`api.stripe.com/v2/xauth_/shareable_metrics/...`); if it ever breaks,
