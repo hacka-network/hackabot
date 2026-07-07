@@ -14,8 +14,10 @@ MRR_CHART_IDENTIFIER = "bento_mrr_volume"
 MIN_MRR_USD = 10000
 MAX_DATA_AGE_DAYS = 60
 
-# ponytail: hardcoded approximate rates, only gate auto-approval —
-# humans review anything below threshold. Decimal currencies only.
+# Fallback rates if the live FX API is down. Also the allowlist of
+# supported currencies — decimal currencies only, since Stripe totals
+# are in minor units and zero-decimal currencies (JPY etc.) would need
+# different math. Unknown currencies go to manual review.
 USD_RATES = dict(
     usd=1.0,
     eur=1.17,
@@ -28,6 +30,28 @@ USD_RATES = dict(
     nok=0.10,
     dkk=0.16,
 )
+
+FX_RATES_URL = "https://api.frankfurter.dev/v1/latest?base=USD"
+
+_fx_cache = dict(date=None, rates=None)
+
+
+def _get_usd_rate(currency):
+    if currency not in USD_RATES:
+        return None
+    if _fx_cache["date"] != date.today():
+        try:
+            resp = requests.get(FX_RATES_URL, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            live = resp.json()["rates"]
+            rates = dict(usd=1.0)
+            for code, per_usd in live.items():
+                rates[code.lower()] = 1 / per_usd
+            _fx_cache.update(date=date.today(), rates=rates)
+        except (requests.RequestException, KeyError, ValueError):
+            print("⚠️ FX rates fetch failed, using fallback rates")
+            return USD_RATES[currency]
+    return _fx_cache["rates"].get(currency, USD_RATES[currency])
 
 
 def extract_stripe_link(text):
@@ -58,7 +82,7 @@ def verify_mrr(slug, token):
 
         config = json.loads(data["chart_configuration"])
         currency = config["currency"].lower()
-        rate = USD_RATES.get(currency)
+        rate = _get_usd_rate(currency)
         if rate is None:
             return False, f"unknown currency {currency}"
 

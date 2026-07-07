@@ -7,7 +7,12 @@ from django.test import Client
 from requests import HTTPError
 
 from hackabot.apps.bot.models import JoinRequest, Person
-from hackabot.apps.bot.stripe_mrr import extract_stripe_link, verify_mrr
+from hackabot.apps.bot.stripe_mrr import (
+    FX_RATES_URL,
+    _fx_cache,
+    extract_stripe_link,
+    verify_mrr,
+)
 
 TEST_WEBHOOK_SECRET = "test-webhook-secret-123"
 MRR_CHAT_ID = -1009999999999
@@ -31,6 +36,11 @@ def set_webhook_secret(monkeypatch):
 def mrr_settings(settings):
     settings.MRR_10K_CHAT_ID = MRR_CHAT_ID
     settings.MRR_ADMIN_CHAT_ID = ADMIN_CHAT_ID
+
+
+@pytest.fixture(autouse=True)
+def clear_fx_cache():
+    _fx_cache.update(date=None, rates=None)
 
 
 @pytest.fixture
@@ -420,6 +430,23 @@ class TestVerifyMrr:
         verified, reason = verify_mrr("acme", "AbC123")
 
         assert verified is True
+
+    @responses.activate
+    def test_live_fx_rates_used_when_available(self):
+        # live rate says 1 USD = 1 EUR, so €9,000 is below $10k even
+        # though the fallback rate (1.17) would put it above
+        responses.add(
+            responses.GET,
+            FX_RATES_URL,
+            json=dict(base="USD", rates=dict(EUR=1.0)),
+            status=200,
+        )
+        mock_stripe(stripe_response(currency="eur", total=900000))
+
+        verified, reason = verify_mrr("acme", "AbC123")
+
+        assert verified is False
+        assert "below" in reason
 
     @responses.activate
     def test_below_threshold(self):
