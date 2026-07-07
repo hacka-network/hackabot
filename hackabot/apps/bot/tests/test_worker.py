@@ -47,9 +47,7 @@ def _stub_node_sync(monkeypatch):
         "hackabot.apps.worker.run.sync_nodes_from_url",
         lambda *args, **kwargs: dict(aborted=False),
     )
-    monkeypatch.setattr(
-        "hackabot.apps.worker.run._last_node_sync_at", None
-    )
+    monkeypatch.setattr("hackabot.apps.worker.run._last_node_sync_at", None)
 
 
 class TestShouldSendPoll:
@@ -1302,6 +1300,106 @@ class TestWeeklySummaryMessage:
             assert "@streaker" in body
             assert "(3 attendances in a row!)" in body
 
+    @responses.activate
+    def test_summary_promotes_mrr_group_when_configured(
+        self, db, global_group, settings
+    ):
+        settings.MRR_10K_CHAT_ID = -1009999000
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node_group = Group.objects.create(
+                telegram_id=-1009999123,
+                display_name="Node Group",
+            )
+            node = Node.objects.create(
+                group=node_group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_mrr_promo",
+                node=node,
+                question="Who's coming?",
+            )
+            person = Person.objects.create(
+                telegram_id=44444, first_name="Dana", username="dana"
+            )
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+            responses.add(
+                responses.GET,
+                f"{TELEGRAM_API_BASE}/bottesttoken/getChat",
+                json={
+                    "ok": True,
+                    "result": {"invite_link": "https://t.me/+abc_DEF-123"},
+                },
+                status=200,
+            )
+
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
+
+            posts = [
+                c.request.body.decode()
+                for c in responses.calls
+                if c.request.method == "POST"
+            ]
+            promo = [b for b in posts if "$10k+ MRR group" in b]
+            assert len(promo) == 1
+            assert "https://t.me/+abc_DEF-123" in promo[0]
+            assert "parse_mode" not in promo[0]
+
+    def test_summary_skips_mrr_promo_when_group_unset(
+        self, db, global_group, settings
+    ):
+        settings.MRR_10K_CHAT_ID = 0
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node_group = Group.objects.create(
+                telegram_id=-1009999124,
+                display_name="Node Group",
+            )
+            node = Node.objects.create(
+                group=node_group,
+                name="Bali",
+                emoji="🌴",
+                timezone="UTC",
+            )
+            poll = Poll.objects.create(
+                telegram_id="poll_no_promo",
+                node=node,
+                question="Who's coming?",
+            )
+            person = Person.objects.create(
+                telegram_id=55555, first_name="Eve", username="eve"
+            )
+            PollAnswer.objects.create(poll=poll, person=person, yes=True)
+
+            with responses.RequestsMock() as rsps:
+                rsps.add(
+                    responses.POST,
+                    f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                    json={"ok": True, "result": {"message_id": 1001}},
+                    status=200,
+                )
+                friday = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+                process_weekly_summary(friday)
+
+                assert len(rsps.calls) == 1
+
 
 class TestShouldSendYearlySummary:
     @pytest.fixture
@@ -1313,7 +1411,9 @@ class TestShouldSendYearlySummary:
 
     def test_returns_true_on_dec_31_at_correct_time(self, global_group):
         dec_31_noon_utc = arrow.Arrow(2026, 12, 31, 12, 0, 0, tzinfo="UTC")
-        assert should_send_yearly_summary(global_group, dec_31_noon_utc) is True
+        assert (
+            should_send_yearly_summary(global_group, dec_31_noon_utc) is True
+        )
 
     def test_returns_false_on_dec_30(self, global_group):
         dec_30_7am_utc = arrow.Arrow(2026, 12, 30, 7, 0, 0, tzinfo="UTC")
@@ -1343,7 +1443,9 @@ class TestShouldSendYearlySummary:
     def test_returns_true_if_never_sent(self, global_group):
         global_group.last_yearly_summary_sent_at = None
         dec_31_noon_utc = arrow.Arrow(2026, 12, 31, 12, 0, 0, tzinfo="UTC")
-        assert should_send_yearly_summary(global_group, dec_31_noon_utc) is True
+        assert (
+            should_send_yearly_summary(global_group, dec_31_noon_utc) is True
+        )
 
 
 class TestProcessYearlySummary:

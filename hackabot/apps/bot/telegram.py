@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 import requests
+from django.conf import settings
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from requests import HTTPError
@@ -54,6 +55,7 @@ ALLOWED_UPDATES = [
     "poll_answer",
     "chat_member",
     "callback_query",
+    "chat_join_request",
 ]
 
 
@@ -156,21 +158,19 @@ def send_long(chat_id, text):
         send(chat_id, chunk)
 
 
-def send(chat_id, text):
+def send(chat_id, text, parse_mode="Markdown"):
     print(f"📤 Calling Telegram API: sendMessage to chat {chat_id}")
     print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/sendMessage"
-    resp = requests.post(
-        url,
-        json=dict(
-            chat_id=chat_id,
-            parse_mode="Markdown",
-            text=text,
-            disable_web_page_preview=True,
-        ),
-        timeout=REQUEST_TIMEOUT,
+    payload = dict(
+        chat_id=chat_id,
+        text=text,
+        disable_web_page_preview=True,
     )
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
     print(f"📥 sendMessage response: {resp.text}")
     _raise_for_status(resp)
     print("✅ Message sent successfully")
@@ -225,6 +225,76 @@ def export_chat_invite_link(chat_id):
     _raise_for_status(resp)
     result = resp.json()
     return result.get("result")
+
+
+def get_chat_invite_link(chat_id):
+    print(f"📤 Calling Telegram API: getChat for chat {chat_id}")
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/getChat"
+    resp = requests.get(
+        url,
+        params=dict(chat_id=chat_id),
+        timeout=REQUEST_TIMEOUT,
+    )
+    _raise_for_status(resp)
+    return resp.json().get("result", {}).get("invite_link")
+
+
+def approve_chat_join_request(chat_id, user_id):
+    print(
+        f"📤 Calling Telegram API: approveChatJoinRequest for {user_id}"
+        f" in chat {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/approveChatJoinRequest"
+    resp = requests.post(
+        url,
+        json=dict(chat_id=chat_id, user_id=user_id),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 approveChatJoinRequest response: {resp.text}")
+    _raise_for_status(resp)
+    print("✅ Join request approved")
+
+
+def decline_chat_join_request(chat_id, user_id):
+    print(
+        f"📤 Calling Telegram API: declineChatJoinRequest for {user_id}"
+        f" in chat {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/declineChatJoinRequest"
+    resp = requests.post(
+        url,
+        json=dict(chat_id=chat_id, user_id=user_id),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 declineChatJoinRequest response: {resp.text}")
+    _raise_for_status(resp)
+    print("✅ Join request declined")
+
+
+def copy_message(chat_id, from_chat_id, message_id, caption, keyboard):
+    print(
+        f"📤 Calling Telegram API: copyMessage {message_id} from"
+        f" {from_chat_id} to {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/copyMessage"
+    resp = requests.post(
+        url,
+        json=dict(
+            chat_id=chat_id,
+            from_chat_id=from_chat_id,
+            message_id=message_id,
+            caption=caption,
+            parse_mode="Markdown",
+            reply_markup=dict(inline_keyboard=keyboard),
+        ),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 copyMessage response: {resp.text}")
+    _raise_for_status(resp)
 
 
 def send_poll(node, when="Thursday", send_invite=True):
@@ -618,6 +688,23 @@ def send_weekly_attendance_summary():
     )
     send(global_group.telegram_id, message)
     print("✅ Weekly attendance summary sent")
+
+    if settings.MRR_10K_CHAT_ID:
+        try:
+            invite_link = get_chat_invite_link(settings.MRR_10K_CHAT_ID)
+        except HTTPError:
+            invite_link = None
+            print("⚠️ Could not fetch MRR invite link, skipping promo")
+        if invite_link:
+            print("📤 Sending $10k MRR group promo after weekly summary")
+            send(
+                global_group.telegram_id,
+                "🏦 We have a private $10k+ MRR group. Join with this"
+                " link and the bot will message you to verify:"
+                f" {invite_link}",
+                parse_mode=None,
+            )
+
     return True
 
 
