@@ -269,6 +269,48 @@ class ActivityDay(models.Model):
         )
 
 
+class JoinRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_REVIEW = "review"
+    STATUS_APPROVED = "approved"
+    STATUS_DECLINED = "declined"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending proof"),
+        (STATUS_REVIEW, "Awaiting admin review"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_DECLINED, "Declined"),
+    ]
+
+    person = models.ForeignKey("Person", on_delete=models.CASCADE)
+    chat_id = models.BigIntegerField()
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
+    proof_text = models.TextField(blank=True)
+    reason = models.CharField(max_length=255, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ["person", "chat_id"]
+        verbose_name = "Join request"
+        verbose_name_plural = "Join requests"
+
+    def __str__(self):
+        return f"{self.person} for chat {self.chat_id} ({self.status})"
+
+    def to_dict(self):
+        return dict(
+            id=self.id,
+            person_id=self.person_id,
+            chat_id=self.chat_id,
+            status=self.status,
+            proof_text=self.proof_text,
+            reason=self.reason,
+            created=self.created.isoformat(),
+        )
+
+
 class MeetupPhoto(models.Model):
     node = models.ForeignKey("Node", on_delete=models.CASCADE)
     telegram_file_id = models.CharField(max_length=255, unique=True)

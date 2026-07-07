@@ -14,11 +14,13 @@ from django.http import HttpResponse, JsonResponse
 from django.utils import timezone as django_timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+from requests import HTTPError
 
 from .models import (
     ActivityDay,
     Group,
     GroupPerson,
+    JoinRequest,
     MeetupPhoto,
     Node,
     Person,
@@ -26,15 +28,19 @@ from .models import (
     PollAnswer,
 )
 from .node_sync import sync_nodes_from_url
+from .stripe_mrr import extract_stripe_link, verify_mrr
 from .telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
     answer_callback_query,
+    approve_chat_join_request,
+    decline_chat_join_request,
     download_file,
     is_chat_admin,
     restrict_chat_member,
     send,
     send_chat_action,
     send_long,
+    send_with_keyboard,
     verify_webhook_secret,
 )
 
@@ -553,6 +559,14 @@ def _handle_dm(message_data):
     chat_id = chat_data["id"]
     print(f"📩 DM from {person.first_name}: {text[:50]}...")
 
+    join_request = JoinRequest.objects.filter(
+        person=person, status=JoinRequest.STATUS_PENDING
+    ).first()
+    if join_request:
+        print("📩 DM is proof for a pending join request")
+        _handle_join_request_proof(chat_id, join_request, text)
+        return
+
     is_member_of_any_node = Node.objects.filter(
         group__groupperson__person=person,
         group__groupperson__left=False,
@@ -890,6 +904,169 @@ def _handle_bio_command(chat_id, person, text):
 #     send(chat_id, message)
 
 
+def _handle_chat_join_request(join_request_data):
+    print("🚪 Handling chat_join_request...")
+    chat_id = join_request_data.get("chat", {}).get("id")
+    if chat_id != settings.MRR_10K_CHAT_ID:
+        print(f"⚠️ Join request for unmanaged chat {chat_id}, skipping")
+        return
+
+    person = _get_or_create_person(join_request_data.get("from"))
+    if not person:
+        print("⚠️ No user data in join request, skipping")
+        return
+
+    join_request, _ = JoinRequest.objects.update_or_create(
+        person=person,
+        chat_id=chat_id,
+        defaults=dict(
+            status=JoinRequest.STATUS_PENDING,
+            proof_text="",
+            reason="",
+        ),
+    )
+    print(f"🚪 Join request #{join_request.id} pending for {person}")
+    send(
+        person.telegram_id,
+        "👋 Hey! You've requested to join the *$10k MRR* group.\n\n"
+        "To verify your MRR, please reply with a link to your public"
+        " Stripe MRR chart (create one from your Stripe dashboard"
+        " chart via Share).\n\n"
+        "It looks like: https://profile.stripe.com/yourcompany/AbC123\n\n"
+        "No Stripe? Reply with other proof and an admin will review"
+        " it manually.",
+    )
+
+
+def _handle_join_request_proof(chat_id, join_request, text):
+    join_request.proof_text = text
+
+    link = extract_stripe_link(text)
+    if not link:
+        _send_join_request_review(join_request, "no Stripe link in reply")
+        send(
+            chat_id,
+            "🙏 Thanks! An admin will review your request and get"
+            " back to you soon.",
+        )
+        return
+
+    verified, reason = verify_mrr(*link)
+    if not verified:
+        _send_join_request_review(join_request, reason)
+        send(
+            chat_id,
+            "🙏 Thanks! I couldn't verify that automatically"
+            f" ({reason}), so an admin will review your request"
+            " and get back to you soon.",
+        )
+        return
+
+    try:
+        approve_chat_join_request(
+            join_request.chat_id, join_request.person.telegram_id
+        )
+    except HTTPError:
+        _send_join_request_review(
+            join_request, f"{reason}, but approving via Telegram failed"
+        )
+        send(
+            chat_id,
+            "🙏 Thanks! An admin will review your request and get"
+            " back to you soon.",
+        )
+        return
+
+    join_request.status = JoinRequest.STATUS_APPROVED
+    join_request.reason = reason
+    join_request.save()
+    print(f"✅ Join request #{join_request.id} auto-approved: {reason}")
+    send(chat_id, "🎉 Verified! Welcome to the $10k MRR group.")
+
+
+def _send_join_request_review(join_request, reason):
+    join_request.status = JoinRequest.STATUS_REVIEW
+    join_request.reason = reason
+    join_request.save()
+    print(f"🔎 Join request #{join_request.id} sent to review: {reason}")
+
+    if not settings.MRR_ADMIN_CHAT_ID:
+        print("⚠️ MRR_ADMIN_CHAT_ID not set, cannot notify admins")
+        return
+
+    person = join_request.person
+    send_with_keyboard(
+        settings.MRR_ADMIN_CHAT_ID,
+        f"🔎 *Join request* from {person} for the $10k MRR group.\n\n"
+        f"Reason for review: {reason}\n\n"
+        f"Their message:\n{join_request.proof_text}",
+        [
+            [
+                dict(
+                    text="✅ Approve",
+                    callback_data=f"jr_approve:{join_request.id}",
+                ),
+                dict(
+                    text="❌ Decline",
+                    callback_data=f"jr_decline:{join_request.id}",
+                ),
+            ]
+        ],
+    )
+
+
+def _handle_join_request_callback(callback_query_id, callback_data):
+    action, _, request_id = callback_data.partition(":")
+    join_request = JoinRequest.objects.filter(id=request_id).first()
+    if not join_request:
+        print(f"⚠️ Unknown join request id {request_id}")
+        answer_callback_query(callback_query_id, "Request not found.")
+        return
+
+    if join_request.status != JoinRequest.STATUS_REVIEW:
+        print(f"⚠️ Join request #{request_id} already {join_request.status}")
+        answer_callback_query(
+            callback_query_id, f"Already {join_request.status}."
+        )
+        return
+
+    person = join_request.person
+    if action == "jr_approve":
+        try:
+            approve_chat_join_request(join_request.chat_id, person.telegram_id)
+        except HTTPError:
+            answer_callback_query(
+                callback_query_id,
+                "Telegram rejected the approval (request expired?).",
+            )
+            return
+        join_request.status = JoinRequest.STATUS_APPROVED
+        join_request.save()
+        answer_callback_query(callback_query_id, "Approved ✅")
+        send(
+            person.telegram_id,
+            "🎉 You've been approved! Welcome to the $10k MRR group.",
+        )
+    else:
+        try:
+            decline_chat_join_request(join_request.chat_id, person.telegram_id)
+        except HTTPError:
+            answer_callback_query(
+                callback_query_id,
+                "Telegram rejected the decline (request expired?).",
+            )
+            return
+        join_request.status = JoinRequest.STATUS_DECLINED
+        join_request.save()
+        answer_callback_query(callback_query_id, "Declined ❌")
+        send(
+            person.telegram_id,
+            "😔 Sorry, your request to join the $10k MRR group was"
+            " declined. If you think this is a mistake, reach out"
+            " to an admin.",
+        )
+
+
 def _handle_callback_query(callback_query_data):
     print("🔘 Handling callback query...")
     callback_query_id = callback_query_data.get("id")
@@ -904,8 +1081,10 @@ def _handle_callback_query(callback_query_data):
     #     node_slug = callback_data.replace("node_invite:", "")
     #     print(f"🔘 Processing node invite callback for {node_slug}")
     #     _handle_node_invite_callback(callback_query_id, chat_id, node_slug)
-    # else:
-    if True:
+    if callback_data.startswith(("jr_approve:", "jr_decline:")):
+        print(f"🔘 Processing join request callback: {callback_data}")
+        _handle_join_request_callback(callback_query_id, callback_data)
+    else:
         print(f"⚠️ Unknown callback_data: {callback_data}")
         answer_callback_query(callback_query_id)
 
@@ -961,6 +1140,11 @@ def telegram_webhook(request):
     if "callback_query" in data:
         print("📥 Update type: callback_query")
         _handle_callback_query(data["callback_query"])
+
+    # Handle join requests for gated groups
+    if "chat_join_request" in data:
+        print("📥 Update type: chat_join_request")
+        _handle_chat_join_request(data["chat_join_request"])
 
     print("📥✅ Webhook processed successfully")
     return JsonResponse(dict(ok=True))

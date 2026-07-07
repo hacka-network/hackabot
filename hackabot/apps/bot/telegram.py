@@ -54,6 +54,7 @@ ALLOWED_UPDATES = [
     "poll_answer",
     "chat_member",
     "callback_query",
+    "chat_join_request",
 ]
 
 
@@ -225,6 +226,40 @@ def export_chat_invite_link(chat_id):
     _raise_for_status(resp)
     result = resp.json()
     return result.get("result")
+
+
+def approve_chat_join_request(chat_id, user_id):
+    print(
+        f"📤 Calling Telegram API: approveChatJoinRequest for {user_id}"
+        f" in chat {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/approveChatJoinRequest"
+    resp = requests.post(
+        url,
+        json=dict(chat_id=chat_id, user_id=user_id),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 approveChatJoinRequest response: {resp.text}")
+    _raise_for_status(resp)
+    print("✅ Join request approved")
+
+
+def decline_chat_join_request(chat_id, user_id):
+    print(
+        f"📤 Calling Telegram API: declineChatJoinRequest for {user_id}"
+        f" in chat {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/declineChatJoinRequest"
+    resp = requests.post(
+        url,
+        json=dict(chat_id=chat_id, user_id=user_id),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 declineChatJoinRequest response: {resp.text}")
+    _raise_for_status(resp)
+    print("✅ Join request declined")
 
 
 def send_poll(node, when="Thursday", send_invite=True):

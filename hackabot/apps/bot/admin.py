@@ -12,6 +12,7 @@ from .models import (
     Event,
     Group,
     GroupPerson,
+    JoinRequest,
     MeetupPhoto,
     Node,
     Person,
@@ -219,11 +220,38 @@ class ActivityDayAdmin(admin.ModelAdmin):
     date_hierarchy = "date"
 
 
+@admin.register(JoinRequest)
+class JoinRequestAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "person",
+        "chat_id",
+        "status",
+        "reason",
+        "created",
+    ]
+    list_filter = ["status"]
+    search_fields = ["person__first_name", "person__username"]
+    ordering = ["-created"]
+    raw_id_fields = ["person"]
+
+
 @admin.register(MeetupPhoto)
 class MeetupPhotoAdmin(admin.ModelAdmin):
-    list_display = ["id", "node", "preview_thumb", "uploaded_by", "size_kb", "created"]
+    list_display = [
+        "id",
+        "node",
+        "preview_thumb",
+        "uploaded_by",
+        "size_kb",
+        "created",
+    ]
     list_filter = ["node"]
-    search_fields = ["node__name", "uploaded_by__first_name", "uploaded_by__username"]
+    search_fields = [
+        "node__name",
+        "uploaded_by__first_name",
+        "uploaded_by__username",
+    ]
     ordering = ["-created"]
     raw_id_fields = ["node", "uploaded_by"]
     readonly_fields = ["telegram_file_id", "preview_large", "size_kb"]
