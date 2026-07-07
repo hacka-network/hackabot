@@ -301,6 +301,28 @@ def delete_message(chat_id, message_id):
     _raise_for_status(resp)
 
 
+def edit_message_text(chat_id, message_id, text):
+    print(
+        f"📤 Calling Telegram API: editMessageText {message_id} in"
+        f" chat {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/editMessageText"
+    resp = requests.post(
+        url,
+        json=dict(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        ),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 editMessageText response: {resp.text}")
+    _raise_for_status(resp)
+
+
 def send_poll(node, when="Thursday", send_invite=True):
     chat_id = node.group.telegram_id
     name = f"{node.emoji} {node.name}" if node.emoji else node.name

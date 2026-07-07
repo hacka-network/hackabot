@@ -79,6 +79,18 @@ def deleted_messages(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def edited_messages(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "hackabot.apps.bot.views.edit_message_text",
+        lambda chat_id, message_id, text: calls.append(
+            (chat_id, message_id, text)
+        ),
+    )
+    return calls
+
+
 @pytest.fixture
 def answered_callbacks(monkeypatch):
     answered = []
@@ -382,16 +394,21 @@ class TestProofDM:
         join_request = JoinRequest.objects.get()
         assert join_request.status == JoinRequest.STATUS_REVIEW
         assert join_request.proof_text == "here is my dashboard"
-        assert sent_keyboards == []
+        # text card carries the buttons, photo forwarded separately
+        assert len(sent_keyboards) == 1
+        card_chat, card_text, card_keyboard = sent_keyboards[0]
+        assert card_chat == ADMIN_CHAT_ID
+        assert card_keyboard[0][0]["callback_data"] == (
+            f"jr_approve:{join_request.id}"
+        )
         assert len(copied) == 1
         chat_id, from_chat_id, message_id, caption, keyboard = copied[0]
         assert chat_id == ADMIN_CHAT_ID
         assert from_chat_id == 555
         assert message_id == 42
-        assert "attached" in caption
-        assert keyboard[0][0]["callback_data"] == (
-            f"jr_approve:{join_request.id}"
-        )
+        assert keyboard is None
+        assert "Proof from" in caption
+        assert join_request.admin_message_ids == [888]
 
     def test_photo_with_valid_link_caption_auto_approves(
         self, client, db, sent_messages, approved, copied, monkeypatch
@@ -510,7 +527,7 @@ class TestAdminCallbacks:
         user_msgs = [m for m in sent_messages if m[0] == 555]
         assert "approved" in user_msgs[0][1]
 
-    def test_approve_deletes_evidence_and_posts_status(
+    def test_approve_deletes_evidence_and_edits_card(
         self,
         client,
         db,
@@ -518,6 +535,7 @@ class TestAdminCallbacks:
         answered_callbacks,
         approved,
         deleted_messages,
+        edited_messages,
     ):
         join_request = pending_request()
         join_request.status = JoinRequest.STATUS_REVIEW
@@ -530,8 +548,10 @@ class TestAdminCallbacks:
             (ADMIN_CHAT_ID, 18),
             (ADMIN_CHAT_ID, 19),
         ]
-        admin_msgs = [m for m in sent_messages if m[0] == ADMIN_CHAT_ID]
-        assert "✅ Approved" in admin_msgs[0][1]
+        assert edited_messages[0][0] == ADMIN_CHAT_ID
+        assert edited_messages[0][1] == 20
+        assert "✅ Approved" in edited_messages[0][2]
+        assert "Evidence removed" in edited_messages[0][2]
         join_request.refresh_from_db()
         assert join_request.admin_message_ids == []
 

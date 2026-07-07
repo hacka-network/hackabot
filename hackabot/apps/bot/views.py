@@ -9,6 +9,7 @@ from difflib import SequenceMatcher
 import arrow
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import F, Q
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone as django_timezone
@@ -38,6 +39,7 @@ from .telegram import (
     decline_chat_join_request,
     delete_message,
     download_file,
+    edit_message_text,
     is_chat_admin,
     restrict_chat_member,
     send,
@@ -981,23 +983,34 @@ def _delete_admin_message(message_id):
         print(f"⚠️ Could not delete admin message {message_id}")
 
 
-def _clear_admin_evidence(join_request, fallback_message_id, status_label):
-    message_ids = list(join_request.admin_message_ids or [])
-    if not message_ids and fallback_message_id:
-        message_ids = [fallback_message_id]
-    for message_id in message_ids:
+def _append_admin_evidence(join_request_id, message_id):
+    with transaction.atomic():
+        row = JoinRequest.objects.select_for_update().get(id=join_request_id)
+        ids = list(row.admin_message_ids or [])
+        ids.append(message_id)
+        row.admin_message_ids = ids
+        row.save(update_fields=["admin_message_ids"])
+
+
+def _resolve_admin_card(join_request, card_message_id, status_label):
+    for message_id in list(join_request.admin_message_ids or []):
         _delete_admin_message(message_id)
 
-    if not settings.MRR_ADMIN_CHAT_ID:
+    if not settings.MRR_ADMIN_CHAT_ID or not card_message_id:
         return
     person = _md_escape(str(join_request.person))
+    text = (
+        f"🔎 Join request from {person} (request #{join_request.id})\n\n"
+        f"{status_label}\n_(Evidence removed after approval.)_"
+    )
     try:
-        send(
-            settings.MRR_ADMIN_CHAT_ID,
-            f"{status_label} {person} (request #{join_request.id})",
-        )
+        edit_message_text(settings.MRR_ADMIN_CHAT_ID, card_message_id, text)
     except HTTPError:
-        print(f"⚠️ Could not post resolution for #{join_request.id}")
+        _delete_admin_message(card_message_id)
+        try:
+            send(settings.MRR_ADMIN_CHAT_ID, text)
+        except HTTPError:
+            print(f"⚠️ Could not resolve admin card for #{join_request.id}")
 
 
 def _within_proof_window(join_request):
@@ -1051,10 +1064,7 @@ def _handle_additional_proof(message_data, join_request):
         print(f"⚠️ Could not forward extra proof for #{join_request.id}")
 
     if extra_id:
-        ids = list(join_request.admin_message_ids or [])
-        ids.append(extra_id)
-        join_request.admin_message_ids = ids
-        join_request.save(update_fields=["admin_message_ids"])
+        _append_admin_evidence(join_request.id, extra_id)
 
 
 def _handle_join_request_proof(message_data, join_request):
@@ -1171,39 +1181,35 @@ def _send_join_request_review(
         f"Reason for review: {_md_escape(reason)}"
     )
 
-    text_body = (
-        f"{header}\n\nTheir message:"
-        f"\n{_md_escape(join_request.proof_text)}"
-    )
-    admin_msg_id = None
+    if has_media and from_chat_id and message_id:
+        card_text = header
+    else:
+        card_text = (
+            f"{header}\n\nTheir message:"
+            f"\n{_md_escape(join_request.proof_text)}"
+        )
+
     try:
-        if has_media and from_chat_id and message_id:
-            try:
-                admin_msg_id = copy_message(
-                    settings.MRR_ADMIN_CHAT_ID,
-                    from_chat_id,
-                    message_id,
-                    f"{header}\n\nTheir proof is attached.",
-                    keyboard,
-                )
-            except HTTPError:
-                print(
-                    f"⚠️ Media copy failed for join request"
-                    f" #{join_request.id}, sending text card"
-                )
-        if admin_msg_id is None:
-            admin_msg_id = send_with_keyboard(
-                settings.MRR_ADMIN_CHAT_ID, text_body, keyboard
-            )
+        send_with_keyboard(settings.MRR_ADMIN_CHAT_ID, card_text, keyboard)
     except HTTPError:
         print(
             f"⚠️ Could not notify admins for join request"
             f" #{join_request.id}"
         )
 
-    if admin_msg_id:
-        join_request.admin_message_ids = [admin_msg_id]
-        join_request.save(update_fields=["admin_message_ids"])
+    if has_media and from_chat_id and message_id:
+        try:
+            proof_id = copy_message(
+                settings.MRR_ADMIN_CHAT_ID,
+                from_chat_id,
+                message_id,
+                f"📎 Proof from {_md_escape(str(person))}",
+            )
+        except HTTPError:
+            proof_id = None
+            print(f"⚠️ Could not forward proof for #{join_request.id}")
+        if proof_id:
+            _append_admin_evidence(join_request.id, proof_id)
 
 
 def _handle_join_request_callback(
@@ -1235,7 +1241,7 @@ def _handle_join_request_callback(
             )
             return
         answer_callback_query(callback_query_id, "Approved ✅")
-        _clear_admin_evidence(join_request, message_id, "✅ Approved")
+        _resolve_admin_card(join_request, message_id, "✅ Approved")
         join_request.status = JoinRequest.STATUS_APPROVED
         join_request.proof_text = ""
         join_request.admin_message_ids = []
@@ -1254,7 +1260,7 @@ def _handle_join_request_callback(
             )
             return
         answer_callback_query(callback_query_id, "Declined ❌")
-        _clear_admin_evidence(join_request, message_id, "❌ Declined")
+        _resolve_admin_card(join_request, message_id, "❌ Declined")
         join_request.status = JoinRequest.STATUS_DECLINED
         join_request.proof_text = ""
         join_request.admin_message_ids = []
