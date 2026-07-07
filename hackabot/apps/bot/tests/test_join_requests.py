@@ -332,6 +332,26 @@ class TestProofDM:
         assert "12k\\_month" in card_text
         assert "\\*honest\\*" in card_text
 
+    def test_admin_notify_failure_does_not_crash_webhook(
+        self, client, db, sent_messages, monkeypatch
+    ):
+        def raise_http_error(chat_id, text, keyboard):
+            raise HTTPError("400 Bad Request")
+
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send_with_keyboard",
+            raise_http_error,
+        )
+        pending_request()
+
+        response = post_webhook(
+            client, dm_update(text="I use Paddle, no stripe")
+        )
+
+        assert response.status_code == 200
+        join_request = JoinRequest.objects.get()
+        assert join_request.status == JoinRequest.STATUS_REVIEW
+
     def test_photo_proof_forwarded_to_admin(
         self, client, db, sent_messages, sent_keyboards, copied
     ):

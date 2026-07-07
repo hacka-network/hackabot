@@ -1073,21 +1073,32 @@ def _send_join_request_review(
         f"Reason for review: {_md_escape(reason)}"
     )
 
-    if has_media and from_chat_id and message_id:
-        copy_message(
-            settings.MRR_ADMIN_CHAT_ID,
-            from_chat_id,
-            message_id,
-            f"{header}\n\nTheir proof is attached.",
-            keyboard,
-        )
-        return
-
-    send_with_keyboard(
-        settings.MRR_ADMIN_CHAT_ID,
-        f"{header}\n\nTheir message:\n{_md_escape(join_request.proof_text)}",
-        keyboard,
+    text_body = (
+        f"{header}\n\nTheir message:"
+        f"\n{_md_escape(join_request.proof_text)}"
     )
+    try:
+        if has_media and from_chat_id and message_id:
+            try:
+                copy_message(
+                    settings.MRR_ADMIN_CHAT_ID,
+                    from_chat_id,
+                    message_id,
+                    f"{header}\n\nTheir proof is attached.",
+                    keyboard,
+                )
+                return
+            except HTTPError:
+                print(
+                    f"⚠️ Media copy failed for join request"
+                    f" #{join_request.id}, sending text card"
+                )
+        send_with_keyboard(settings.MRR_ADMIN_CHAT_ID, text_body, keyboard)
+    except HTTPError:
+        print(
+            f"⚠️ Could not notify admins for join request"
+            f" #{join_request.id}"
+        )
 
 
 def _handle_join_request_callback(callback_query_id, callback_data):
