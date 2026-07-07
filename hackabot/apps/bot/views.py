@@ -36,8 +36,8 @@ from .telegram import (
     approve_chat_join_request,
     copy_message,
     decline_chat_join_request,
+    delete_message,
     download_file,
-    edit_message_remove_keyboard,
     is_chat_admin,
     restrict_chat_member,
     send,
@@ -936,7 +936,7 @@ def _handle_chat_join_request(join_request_data):
             proof_text="",
             reason="",
             proof_started_at=None,
-            admin_message_id=None,
+            admin_message_ids=[],
         ),
     )
     print(f"🚪 Join request #{join_request.id} pending for {person}")
@@ -972,13 +972,32 @@ def _notify_requester(chat_id, text):
         print(f"⚠️ Could not DM requester {chat_id}")
 
 
-def _remove_card_buttons(chat_id, message_id):
-    if not chat_id or not message_id:
+def _delete_admin_message(message_id):
+    if not settings.MRR_ADMIN_CHAT_ID or not message_id:
         return
     try:
-        edit_message_remove_keyboard(chat_id, message_id)
+        delete_message(settings.MRR_ADMIN_CHAT_ID, message_id)
     except HTTPError:
-        print(f"⚠️ Could not clear buttons on message {message_id}")
+        print(f"⚠️ Could not delete admin message {message_id}")
+
+
+def _clear_admin_evidence(join_request, fallback_message_id, status_label):
+    message_ids = list(join_request.admin_message_ids or [])
+    if not message_ids and fallback_message_id:
+        message_ids = [fallback_message_id]
+    for message_id in message_ids:
+        _delete_admin_message(message_id)
+
+    if not settings.MRR_ADMIN_CHAT_ID:
+        return
+    person = _md_escape(str(join_request.person))
+    try:
+        send(
+            settings.MRR_ADMIN_CHAT_ID,
+            f"{status_label} {person} (request #{join_request.id})",
+        )
+    except HTTPError:
+        print(f"⚠️ Could not post resolution for #{join_request.id}")
 
 
 def _within_proof_window(join_request):
@@ -1017,16 +1036,25 @@ def _handle_additional_proof(message_data, join_request):
         f"➕ More from {_md_escape(str(person))}"
         f" (request #{join_request.id})"
     )
+    extra_id = None
     try:
         if media_id:
-            copy_message(settings.MRR_ADMIN_CHAT_ID, chat_id, media_id, header)
+            extra_id = copy_message(
+                settings.MRR_ADMIN_CHAT_ID, chat_id, media_id, header
+            )
         elif text:
-            send(
+            extra_id = send(
                 settings.MRR_ADMIN_CHAT_ID,
                 f"{header}\n\n{_md_escape(text)}",
             )
     except HTTPError:
         print(f"⚠️ Could not forward extra proof for #{join_request.id}")
+
+    if extra_id:
+        ids = list(join_request.admin_message_ids or [])
+        ids.append(extra_id)
+        join_request.admin_message_ids = ids
+        join_request.save(update_fields=["admin_message_ids"])
 
 
 def _handle_join_request_proof(message_data, join_request):
@@ -1174,8 +1202,8 @@ def _send_join_request_review(
         )
 
     if admin_msg_id:
-        join_request.admin_message_id = admin_msg_id
-        join_request.save(update_fields=["admin_message_id"])
+        join_request.admin_message_ids = [admin_msg_id]
+        join_request.save(update_fields=["admin_message_ids"])
 
 
 def _handle_join_request_callback(
@@ -1193,7 +1221,7 @@ def _handle_join_request_callback(
         answer_callback_query(
             callback_query_id, f"Already {join_request.status}."
         )
-        _remove_card_buttons(chat_id, message_id)
+        _delete_admin_message(message_id)
         return
 
     person = join_request.person
@@ -1206,11 +1234,12 @@ def _handle_join_request_callback(
                 "Telegram rejected the approval (request expired?).",
             )
             return
+        answer_callback_query(callback_query_id, "Approved ✅")
+        _clear_admin_evidence(join_request, message_id, "✅ Approved")
         join_request.status = JoinRequest.STATUS_APPROVED
         join_request.proof_text = ""
+        join_request.admin_message_ids = []
         join_request.save()
-        answer_callback_query(callback_query_id, "Approved ✅")
-        _remove_card_buttons(chat_id, message_id)
         _notify_requester(
             person.telegram_id,
             "🎉 You've been approved! Welcome to the $10k MRR group.",
@@ -1224,11 +1253,12 @@ def _handle_join_request_callback(
                 "Telegram rejected the decline (request expired?).",
             )
             return
+        answer_callback_query(callback_query_id, "Declined ❌")
+        _clear_admin_evidence(join_request, message_id, "❌ Declined")
         join_request.status = JoinRequest.STATUS_DECLINED
         join_request.proof_text = ""
+        join_request.admin_message_ids = []
         join_request.save()
-        answer_callback_query(callback_query_id, "Declined ❌")
-        _remove_card_buttons(chat_id, message_id)
         _notify_requester(
             person.telegram_id,
             "😔 Sorry, your request to join the $10k MRR group was"

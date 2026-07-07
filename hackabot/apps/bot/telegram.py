@@ -174,6 +174,7 @@ def send(chat_id, text, parse_mode="Markdown"):
     print(f"📥 sendMessage response: {resp.text}")
     _raise_for_status(resp)
     print("✅ Message sent successfully")
+    return resp.json().get("result", {}).get("message_id")
 
 
 def send_with_keyboard(chat_id, text, keyboard):
@@ -284,19 +285,19 @@ def copy_message(chat_id, from_chat_id, message_id, caption, keyboard=None):
     return resp.json().get("result", {}).get("message_id")
 
 
-def edit_message_remove_keyboard(chat_id, message_id):
+def delete_message(chat_id, message_id):
     print(
-        f"📤 Calling Telegram API: editMessageReplyMarkup (clear) for"
-        f" {message_id} in chat {chat_id}"
+        f"📤 Calling Telegram API: deleteMessage {message_id} in"
+        f" chat {chat_id}"
     )
     token = _get_bot_token()
-    url = f"{TELEGRAM_API_BASE}/{token}/editMessageReplyMarkup"
+    url = f"{TELEGRAM_API_BASE}/{token}/deleteMessage"
     resp = requests.post(
         url,
         json=dict(chat_id=chat_id, message_id=message_id),
         timeout=REQUEST_TIMEOUT,
     )
-    print(f"📥 editMessageReplyMarkup response: {resp.text}")
+    print(f"📥 deleteMessage response: {resp.text}")
     _raise_for_status(resp)
 
 

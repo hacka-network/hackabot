@@ -70,10 +70,10 @@ def sent_keyboards(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def cleared_buttons(monkeypatch):
+def deleted_messages(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "hackabot.apps.bot.views.edit_message_remove_keyboard",
+        "hackabot.apps.bot.views.delete_message",
         lambda chat_id, message_id: calls.append((chat_id, message_id)),
     )
     return calls
@@ -504,27 +504,36 @@ class TestAdminCallbacks:
         join_request.refresh_from_db()
         assert join_request.status == JoinRequest.STATUS_APPROVED
         assert join_request.proof_text == ""
+        assert join_request.admin_message_ids == []
         assert approved == [(MRR_CHAT_ID, 555)]
         assert answered_callbacks == [("cb1", "Approved ✅")]
-        assert sent_messages[0][0] == 555
-        assert "approved" in sent_messages[0][1]
+        user_msgs = [m for m in sent_messages if m[0] == 555]
+        assert "approved" in user_msgs[0][1]
 
-    def test_approve_removes_card_buttons(
+    def test_approve_deletes_evidence_and_posts_status(
         self,
         client,
         db,
         sent_messages,
         answered_callbacks,
         approved,
-        cleared_buttons,
+        deleted_messages,
     ):
         join_request = pending_request()
         join_request.status = JoinRequest.STATUS_REVIEW
+        join_request.admin_message_ids = [18, 19]
         join_request.save()
 
         post_webhook(client, callback_update(f"jr_approve:{join_request.id}"))
 
-        assert cleared_buttons == [(ADMIN_CHAT_ID, 20)]
+        assert deleted_messages == [
+            (ADMIN_CHAT_ID, 18),
+            (ADMIN_CHAT_ID, 19),
+        ]
+        admin_msgs = [m for m in sent_messages if m[0] == ADMIN_CHAT_ID]
+        assert "✅ Approved" in admin_msgs[0][1]
+        join_request.refresh_from_db()
+        assert join_request.admin_message_ids == []
 
     def test_decline_callback(
         self, client, db, sent_messages, answered_callbacks, declined
@@ -539,7 +548,8 @@ class TestAdminCallbacks:
         assert join_request.status == JoinRequest.STATUS_DECLINED
         assert declined == [(MRR_CHAT_ID, 555)]
         assert answered_callbacks == [("cb1", "Declined ❌")]
-        assert "declined" in sent_messages[0][1]
+        user_msgs = [m for m in sent_messages if m[0] == 555]
+        assert "declined" in user_msgs[0][1]
 
     def test_double_tap_answers_without_action(
         self, client, db, sent_messages, answered_callbacks, approved

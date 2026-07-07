@@ -290,7 +290,7 @@ class JoinRequest(models.Model):
     proof_text = models.TextField(blank=True)
     reason = models.CharField(max_length=255, blank=True)
     proof_started_at = models.DateTimeField(null=True, blank=True)
-    admin_message_id = models.BigIntegerField(null=True, blank=True)
+    admin_message_ids = models.JSONField(default=list, blank=True)
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:
