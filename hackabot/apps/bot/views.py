@@ -936,7 +936,9 @@ def _handle_chat_join_request(join_request_data):
         "No Stripe? Reply with other proof and an admin will review"
         " it manually.\n\n"
         "_We don't save your revenue data — it's only used to"
-        " evaluate your request to join the group._",
+        " evaluate your request to join the group. You can delete"
+        " the shared link afterwards from your Stripe dashboard"
+        " under Settings → Stripe Profiles._",
     )
 
 
