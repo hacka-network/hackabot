@@ -934,7 +934,9 @@ def _handle_chat_join_request(join_request_data):
         " chart via Share).\n\n"
         "It looks like: https://profile.stripe.com/yourcompany/AbC123\n\n"
         "No Stripe? Reply with other proof and an admin will review"
-        " it manually.",
+        " it manually.\n\n"
+        "_We don't save your revenue data — it's only used to"
+        " evaluate your request to join the group._",
     )
 
 
@@ -978,7 +980,8 @@ def _handle_join_request_proof(chat_id, join_request, text):
         return
 
     join_request.status = JoinRequest.STATUS_APPROVED
-    join_request.reason = reason
+    join_request.reason = "auto-verified"
+    join_request.proof_text = ""
     join_request.save()
     print(f"✅ Join request #{join_request.id} auto-approved: {reason}")
     send(chat_id, "🎉 Verified! Welcome to the $10k MRR group.")
@@ -1041,6 +1044,7 @@ def _handle_join_request_callback(callback_query_id, callback_data):
             )
             return
         join_request.status = JoinRequest.STATUS_APPROVED
+        join_request.proof_text = ""
         join_request.save()
         answer_callback_query(callback_query_id, "Approved ✅")
         send(
@@ -1057,6 +1061,7 @@ def _handle_join_request_callback(callback_query_id, callback_data):
             )
             return
         join_request.status = JoinRequest.STATUS_DECLINED
+        join_request.proof_text = ""
         join_request.save()
         answer_callback_query(callback_query_id, "Declined ❌")
         send(

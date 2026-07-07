@@ -216,6 +216,8 @@ class TestProofDM:
 
         join_request = JoinRequest.objects.get()
         assert join_request.status == JoinRequest.STATUS_APPROVED
+        assert join_request.proof_text == ""
+        assert join_request.reason == "auto-verified"
         assert approved == [(MRR_CHAT_ID, 555)]
         assert "Welcome" in sent_messages[0][1]
 
@@ -307,6 +309,7 @@ class TestAdminCallbacks:
 
         join_request.refresh_from_db()
         assert join_request.status == JoinRequest.STATUS_APPROVED
+        assert join_request.proof_text == ""
         assert approved == [(MRR_CHAT_ID, 555)]
         assert answered_callbacks == [("cb1", "Approved ✅")]
         assert sent_messages[0][0] == 555
