@@ -118,7 +118,10 @@ def _onboard_new_member(person, group):
 
 
 def _welcome_mrr_member(person, group):
-    if person.onboarded:
+    membership, _ = GroupPerson.objects.get_or_create(
+        group=group, person=person
+    )
+    if membership.welcomed:
         print(f"⏭️ {person.first_name} already welcomed to MRR group")
         return
 
@@ -143,8 +146,8 @@ def _welcome_mrr_member(person, group):
         print(f"⚠️ Could not welcome {person.first_name} to MRR group")
         return
 
-    person.onboarded = True
-    person.save(update_fields=["onboarded"])
+    membership.welcomed = True
+    membership.save(update_fields=["welcomed"])
     print(f"✅ Welcomed {person.first_name} to the $10k MRR group")
 
 

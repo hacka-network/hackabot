@@ -71,6 +71,7 @@ class GroupPerson(models.Model):
     created = models.DateTimeField(auto_now_add=True)
     left = models.BooleanField(default=False)
     last_message_at = models.DateTimeField(null=True, blank=True)
+    welcomed = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ["group", "person"]
@@ -93,6 +94,7 @@ class GroupPerson(models.Model):
                 if self.last_message_at
                 else None
             ),
+            welcomed=self.welcomed,
         )
 
 

@@ -7,7 +7,7 @@ from django.test import Client
 from django.utils import timezone as django_timezone
 from requests import HTTPError
 
-from hackabot.apps.bot.models import JoinRequest, Person
+from hackabot.apps.bot.models import Group, GroupPerson, JoinRequest, Person
 from hackabot.apps.bot.views import expire_stale_join_requests
 from hackabot.apps.bot.stripe_mrr import (
     FX_RATES_URL,
@@ -913,7 +913,10 @@ class TestMrrWelcome:
         assert "@mitchnick" in text
         assert "intro yourself and what you're building" in text
         assert "identifiable" in text
-        assert Person.objects.get(telegram_id=555).onboarded is True
+        membership = GroupPerson.objects.get(
+            person__telegram_id=555, group__telegram_id=MRR_CHAT_ID
+        )
+        assert membership.welcomed is True
 
     def test_welcomes_joiner_without_username(self, client, db, sent_messages):
         post_webhook(
@@ -925,7 +928,22 @@ class TestMrrWelcome:
         assert "[Mitch](tg://user?id=555)" in text
         assert "intro yourself" in text
 
-    def test_already_onboarded_not_rewelcomed(self, client, db, sent_messages):
+    def test_already_welcomed_not_rewelcomed(self, client, db, sent_messages):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        group = Group.objects.create(
+            telegram_id=MRR_CHAT_ID, display_name="Hacka+ | $10k MRR"
+        )
+        GroupPerson.objects.create(group=group, person=person, welcomed=True)
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert sent_messages == []
+
+    def test_onboarded_member_still_welcomed_to_mrr(
+        self, client, db, sent_messages
+    ):
         Person.objects.create(
             telegram_id=555,
             first_name="Bob",
@@ -935,7 +953,8 @@ class TestMrrWelcome:
 
         post_webhook(client, chat_member_update(username="bob10k"))
 
-        assert sent_messages == []
+        assert len(sent_messages) == 1
+        assert "@bob10k" in sent_messages[0][1]
 
     def test_bot_join_not_welcomed(self, client, db, sent_messages):
         post_webhook(client, chat_member_update(is_bot=True))
