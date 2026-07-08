@@ -51,6 +51,7 @@ from .telegram import (
 
 BIO_MAX_LENGTH = 140
 PROOF_WINDOW_SECONDS = 15
+STALE_PENDING_HOURS = 1
 
 if settings.IS_PRODUCTION:
     PHOTO_UPLOAD_CHAT_ID = -1002257954378
@@ -84,6 +85,11 @@ def _onboard_new_member(person, group):
     if person.is_bot:
         return
 
+    mrr_id = settings.MRR_10K_CHAT_ID
+    if mrr_id and group.telegram_id == mrr_id:
+        _welcome_mrr_member(person, group)
+        return
+
     if not group.node_set.exists():
         print(
             f"⏭️ Skipping onboard for {person.first_name} - "
@@ -109,6 +115,37 @@ def _onboard_new_member(person, group):
     person.onboarded = True
     person.save()
     print(f"✅ Onboarding complete for {person.first_name}")
+
+
+def _welcome_mrr_member(person, group):
+    if person.onboarded:
+        print(f"⏭️ {person.first_name} already welcomed to MRR group")
+        return
+
+    print(f"🎉 Welcoming {person.first_name} to the $10k MRR group")
+    body = (
+        " - intro yourself and what you're building! Also please"
+        " make sure your Telegram display name is set to something"
+        " identifiable"
+    )
+    if person.username:
+        message = f"Hi @{person.username}{body}"
+        parse_mode = ""
+    else:
+        name = person.first_name or "there"
+        mention = f"[{name}](tg://user?id={person.telegram_id})"
+        message = f"Hi {mention}{body}"
+        parse_mode = "Markdown"
+
+    try:
+        send(group.telegram_id, message, parse_mode=parse_mode)
+    except HTTPError:
+        print(f"⚠️ Could not welcome {person.first_name} to MRR group")
+        return
+
+    person.onboarded = True
+    person.save(update_fields=["onboarded"])
+    print(f"✅ Welcomed {person.first_name} to the $10k MRR group")
 
 
 def _get_or_create_group(chat_data):
@@ -938,6 +975,7 @@ def _handle_chat_join_request(join_request_data):
             proof_text="",
             reason="",
             proof_started_at=None,
+            pending_since=django_timezone.now(),
             admin_message_ids=[],
         ),
     )
@@ -965,6 +1003,44 @@ def _handle_chat_join_request(join_request_data):
             join_request,
             "couldn't DM the requester (they may not have started" " the bot)",
         )
+
+
+def expire_stale_join_requests():
+    cutoff = django_timezone.now() - timedelta(hours=STALE_PENDING_HOURS)
+    stale = JoinRequest.objects.filter(
+        status=JoinRequest.STATUS_PENDING
+    ).filter(
+        Q(pending_since__lt=cutoff)
+        | Q(pending_since__isnull=True, created__lt=cutoff)
+    )
+    expired = 0
+    for join_request in stale:
+        _expire_join_request(join_request)
+        expired += 1
+    return expired
+
+
+def _expire_join_request(join_request):
+    person = join_request.person
+    try:
+        decline_chat_join_request(join_request.chat_id, person.telegram_id)
+    except HTTPError:
+        print(f"⚠️ Could not decline stale join request #{join_request.id}")
+    join_request.status = JoinRequest.STATUS_DECLINED
+    join_request.reason = "expired: no proof submitted"
+    join_request.proof_text = ""
+    join_request.pending_since = None
+    join_request.admin_message_ids = []
+    join_request.save()
+    print(f"⏳ Expired stale join request #{join_request.id} for {person}")
+    _notify_requester(
+        person.telegram_id,
+        "⏳ Your request to join the *$10k MRR* group timed out"
+        " because we didn't get proof of your MRR.\n\n"
+        "No worries, you can request to join again any time. Just"
+        " have your Stripe MRR link or a screenshot of your revenue"
+        " dashboard ready to send.",
+    )
 
 
 def _notify_requester(chat_id, text):

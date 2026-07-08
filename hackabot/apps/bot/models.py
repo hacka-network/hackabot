@@ -290,6 +290,7 @@ class JoinRequest(models.Model):
     proof_text = models.TextField(blank=True)
     reason = models.CharField(max_length=255, blank=True)
     proof_started_at = models.DateTimeField(null=True, blank=True)
+    pending_since = models.DateTimeField(null=True, blank=True)
     admin_message_ids = models.JSONField(default=list, blank=True)
     created = models.DateTimeField(auto_now_add=True)
 
@@ -314,6 +315,9 @@ class JoinRequest(models.Model):
                 self.proof_started_at.isoformat()
                 if self.proof_started_at
                 else None
+            ),
+            pending_since=(
+                self.pending_since.isoformat() if self.pending_since else None
             ),
         )
 

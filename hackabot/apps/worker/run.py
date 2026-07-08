@@ -8,6 +8,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from hackabot.apps.bot.node_sync import sync_nodes_from_url
+from hackabot.apps.bot.views import expire_stale_join_requests
 from hackabot.apps.bot.telegram import (
     HACKA_NETWORK_GLOBAL_CHAT_ID,
     send_event_reminder,
@@ -268,6 +269,12 @@ def process_photo_cleanup(now_utc):
     print(f"🗑️ Cleaned up {deleted} old photos")
 
 
+def process_stale_join_requests():
+    expired = expire_stale_join_requests()
+    if expired:
+        print(f"🧹 Expired {expired} stale join requests")
+
+
 def process_node_sync(now_utc):
     global _last_node_sync_at
 
@@ -299,6 +306,7 @@ def check_all_nodes():
     process_weekly_summary(now_utc)
     process_yearly_summary(now_utc)
     process_photo_cleanup(now_utc)
+    process_stale_join_requests()
 
 
 def run_worker():
