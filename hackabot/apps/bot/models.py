@@ -289,6 +289,7 @@ class JoinRequest(models.Model):
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING
     )
+    product_name = models.CharField(max_length=16, blank=True)
     proof_text = models.TextField(blank=True)
     reason = models.CharField(max_length=255, blank=True)
     proof_started_at = models.DateTimeField(null=True, blank=True)
@@ -310,6 +311,7 @@ class JoinRequest(models.Model):
             person_id=self.person_id,
             chat_id=self.chat_id,
             status=self.status,
+            product_name=self.product_name,
             proof_text=self.proof_text,
             reason=self.reason,
             created=self.created.isoformat(),

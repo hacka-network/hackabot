@@ -263,6 +263,23 @@ def decline_chat_join_request(chat_id, user_id):
     print("✅ Join request declined")
 
 
+def set_chat_member_tag(chat_id, user_id, tag):
+    print(
+        f"📤 Calling Telegram API: setChatMemberTag for {user_id}"
+        f" in chat {chat_id}: {tag!r}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/setChatMemberTag"
+    resp = requests.post(
+        url,
+        json=dict(chat_id=chat_id, user_id=user_id, tag=tag),
+        timeout=REQUEST_TIMEOUT,
+    )
+    print(f"📥 setChatMemberTag response: {resp.text}")
+    _raise_for_status(resp)
+    print(f"✅ Member tag set to {tag!r}")
+
+
 def copy_message(chat_id, from_chat_id, message_id, caption, keyboard=None):
     print(
         f"📤 Calling Telegram API: copyMessage {message_id} from"

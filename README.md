@@ -72,17 +72,23 @@ link creates a join request instead of admitting directly:
 
 1. User taps the invite link → Telegram sends the bot a
    `chat_join_request` update
-2. The bot DMs the user asking for a link to their public Stripe MRR
-   chart (`https://profile.stripe.com/<company>/<token>`, created via
+2. The bot DMs the user asking for *only the name of their product*
+   (max 16 characters, no emoji) — this becomes their Telegram
+   member tag in the group after they join
+3. Once the product name is saved, the bot asks for a link to their
+   public Stripe MRR chart
+   (`https://profile.stripe.com/<company>/<token>`, created via
    Share on a Stripe dashboard chart)
-3. If the chart checks out (live-mode MRR chart, recent data, latest
+4. If the chart checks out (live-mode MRR chart, recent data, latest
    value ≥ $10k USD-equivalent), the bot approves the join request
    automatically
-4. Otherwise (no Stripe, below threshold, or the check fails) the
+5. Otherwise (no Stripe, below threshold, or the check fails) the
    request is forwarded to the admin group with Approve/Decline
    buttons for manual review. If the user replies with a screenshot
    or video instead of a link, that media is forwarded to the admins
    too
+6. When the user actually joins, the bot welcomes them and calls
+   `setChatMemberTag` with the product name they provided
 
 The group is also promoted to the global group right after the weekly
 network stats. Set `MRR_10K_INVITE_LINK` to the group's request-to-join
@@ -98,6 +104,8 @@ Setup:
 - The bot must be an **admin** of the gated group with the
   "Invite Users via Link" right — without it, Telegram silently
   doesn't deliver `chat_join_request` updates
+- The bot also needs the **Manage Tags** (`can_manage_tags`) admin
+  right so it can attach the product name as a member tag on join
 - Set `MRR_10K_CHAT_ID` (the gated group) and `MRR_ADMIN_CHAT_ID`
   (the admin review group) in the environment; while unset the
   feature is disabled

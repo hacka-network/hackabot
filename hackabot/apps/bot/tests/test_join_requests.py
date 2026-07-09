@@ -5,10 +5,13 @@ import pytest
 import responses
 from django.test import Client
 from django.utils import timezone as django_timezone
-from requests import HTTPError
+from requests import HTTPError, Timeout
 
 from hackabot.apps.bot.models import Group, GroupPerson, JoinRequest, Person
-from hackabot.apps.bot.views import expire_stale_join_requests
+from hackabot.apps.bot.views import (
+    _is_valid_product_name,
+    expire_stale_join_requests,
+)
 from hackabot.apps.bot.stripe_mrr import (
     FX_RATES_URL,
     _fx_cache,
@@ -138,6 +141,16 @@ def copied(monkeypatch):
     return calls
 
 
+@pytest.fixture
+def tagged(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "hackabot.apps.bot.views.set_chat_member_tag",
+        lambda chat_id, user_id, tag: calls.append((chat_id, user_id, tag)),
+    )
+    return calls
+
+
 def post_webhook(client, data):
     return client.post(
         "/webhook/telegram/",
@@ -215,7 +228,7 @@ def callback_update(callback_data, callback_query_id="cb1"):
     }
 
 
-def pending_request(user_id=555):
+def pending_request(user_id=555, product_name="Acme"):
     person = Person.objects.create(
         telegram_id=user_id, first_name="Bob", username="bob10k"
     )
@@ -223,6 +236,7 @@ def pending_request(user_id=555):
         person=person,
         chat_id=MRR_CHAT_ID,
         status=JoinRequest.STATUS_PENDING,
+        product_name=product_name,
     )
 
 
@@ -265,9 +279,11 @@ class TestChatJoinRequest:
         assert join_request.status == JoinRequest.STATUS_PENDING
         assert join_request.chat_id == MRR_CHAT_ID
         assert join_request.person.telegram_id == 555
+        assert join_request.product_name == ""
         assert len(sent_messages) == 1
         assert sent_messages[0][0] == 555
-        assert "Stripe" in sent_messages[0][1]
+        assert "name of your product" in sent_messages[0][1]
+        assert "Stripe" not in sent_messages[0][1]
 
     def test_ignores_other_chats(self, client, db, sent_messages):
         post_webhook(client, join_request_update(chat_id=-123))
@@ -279,6 +295,7 @@ class TestChatJoinRequest:
         join_request = pending_request()
         join_request.status = JoinRequest.STATUS_DECLINED
         join_request.proof_text = "old proof"
+        join_request.product_name = "OldCo"
         join_request.save()
 
         post_webhook(client, join_request_update())
@@ -286,6 +303,7 @@ class TestChatJoinRequest:
         join_request.refresh_from_db()
         assert join_request.status == JoinRequest.STATUS_PENDING
         assert join_request.proof_text == ""
+        assert join_request.product_name == ""
         assert JoinRequest.objects.count() == 1
 
     def test_undmable_user_routes_to_review(
@@ -303,6 +321,91 @@ class TestChatJoinRequest:
         assert "couldn't DM" in join_request.reason
         assert len(sent_keyboards) == 1
         assert sent_keyboards[0][0] == ADMIN_CHAT_ID
+
+
+class TestProductNameDM:
+    def test_accepts_product_name_then_asks_for_proof(
+        self, client, db, sent_messages
+    ):
+        pending_request(product_name="")
+
+        post_webhook(client, dm_update(text="Stripe"))
+
+        join_request = JoinRequest.objects.get()
+        assert join_request.product_name == "Stripe"
+        assert join_request.status == JoinRequest.STATUS_PENDING
+        assert len(sent_messages) == 1
+        assert "Got it" in sent_messages[0][1]
+        assert "Stripe" in sent_messages[0][1]
+        assert "profile.stripe.com" in sent_messages[0][1]
+
+    def test_rejects_empty_product_name(self, client, db, sent_messages):
+        pending_request(product_name="")
+
+        post_webhook(client, dm_update(text="   "))
+
+        join_request = JoinRequest.objects.get()
+        assert join_request.product_name == ""
+        assert "only the name of your product" in sent_messages[0][1]
+
+    def test_rejects_too_long_product_name(self, client, db, sent_messages):
+        pending_request(product_name="")
+
+        post_webhook(client, dm_update(text="A" * 17))
+
+        join_request = JoinRequest.objects.get()
+        assert join_request.product_name == ""
+        assert "only the name of your product" in sent_messages[0][1]
+
+    def test_rejects_emoji_product_name(self, client, db, sent_messages):
+        pending_request(product_name="")
+
+        post_webhook(client, dm_update(text="Acme 🚀"))
+
+        join_request = JoinRequest.objects.get()
+        assert join_request.product_name == ""
+        assert "only the name of your product" in sent_messages[0][1]
+
+    def test_validation_rejects_emoji_variants(self):
+        bad = ["🚀", "🇺🇸", "1️⃣", "™️", "©️", "⭐", "Acme🔥", "↔️"]
+        for text in bad:
+            assert not _is_valid_product_name(text), text
+        good = ["Acme", "Acme Corp", "café", "日本語", "A-B_C.io"]
+        for text in good:
+            assert _is_valid_product_name(text), text
+
+    def test_rejects_photo_as_product_name(
+        self, client, db, sent_messages, sent_keyboards
+    ):
+        pending_request(product_name="")
+
+        post_webhook(client, photo_dm_update(caption="Acme"))
+
+        join_request = JoinRequest.objects.get()
+        assert join_request.product_name == ""
+        assert join_request.status == JoinRequest.STATUS_PENDING
+        assert sent_keyboards == []
+        assert "only the name of your product" in sent_messages[0][1]
+
+    def test_proof_not_accepted_before_product_name(
+        self, client, db, sent_messages, approved, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.verify_mrr",
+            lambda slug, token: (True, "MRR verified at $12,000"),
+        )
+        pending_request(product_name="")
+
+        post_webhook(
+            client,
+            dm_update(text="https://profile.stripe.com/acme/AbC123"),
+        )
+
+        join_request = JoinRequest.objects.get()
+        assert join_request.status == JoinRequest.STATUS_PENDING
+        assert join_request.product_name == ""
+        assert approved == []
+        assert "only the name of your product" in sent_messages[0][1]
 
 
 class TestProofDM:
@@ -367,6 +470,7 @@ class TestProofDM:
         assert join_request.proof_text == "I use Paddle, MRR is $15k"
         assert len(sent_keyboards) == 1
         assert "Paddle" in sent_keyboards[0][1]
+        assert "Product: Acme" in sent_keyboards[0][1]
 
     def test_review_card_escapes_markdown(
         self, client, db, sent_messages, sent_keyboards
@@ -378,6 +482,7 @@ class TestProofDM:
             person=person,
             chat_id=MRR_CHAT_ID,
             status=JoinRequest.STATUS_PENDING,
+            product_name="Acme",
         )
 
         update = dm_update(user_id=777, text="MRR is 12k_month *honest*")
@@ -917,6 +1022,126 @@ class TestMrrWelcome:
             person__telegram_id=555, group__telegram_id=MRR_CHAT_ID
         )
         assert membership.welcomed is True
+
+    def test_sets_product_tag_from_approved_request(
+        self, client, db, sent_messages, tagged
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_APPROVED,
+            product_name="Acme",
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        assert tagged == [(MRR_CHAT_ID, 555, "Acme")]
+
+    def test_no_tag_when_no_product_name(
+        self, client, db, sent_messages, tagged
+    ):
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        assert tagged == []
+
+    def test_tag_failure_still_welcomes(
+        self, client, db, sent_messages, monkeypatch
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_APPROVED,
+            product_name="Acme",
+        )
+
+        def raise_http_error(chat_id, user_id, tag):
+            raise HTTPError("403 Forbidden")
+
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.set_chat_member_tag",
+            raise_http_error,
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        membership = GroupPerson.objects.get(
+            person__telegram_id=555, group__telegram_id=MRR_CHAT_ID
+        )
+        assert membership.welcomed is True
+
+    def test_tag_network_error_still_welcomes(
+        self, client, db, sent_messages, monkeypatch
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_APPROVED,
+            product_name="Acme",
+        )
+
+        def raise_timeout(chat_id, user_id, tag):
+            raise Timeout("connection timed out")
+
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.set_chat_member_tag",
+            raise_timeout,
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        membership = GroupPerson.objects.get(
+            person__telegram_id=555, group__telegram_id=MRR_CHAT_ID
+        )
+        assert membership.welcomed is True
+
+    def test_sets_tag_before_request_marked_approved(
+        self, client, db, sent_messages, tagged
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_REVIEW,
+            product_name="Acme",
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        assert tagged == [(MRR_CHAT_ID, 555, "Acme")]
+
+    def test_no_tag_for_declined_request(
+        self, client, db, sent_messages, tagged
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_DECLINED,
+            product_name="Acme",
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        assert tagged == []
 
     def test_welcomes_joiner_without_username(self, client, db, sent_messages):
         post_webhook(
