@@ -227,11 +227,16 @@ class JoinRequestAdmin(admin.ModelAdmin):
         "person",
         "chat_id",
         "status",
+        "product_name",
         "reason",
         "created",
     ]
     list_filter = ["status"]
-    search_fields = ["person__first_name", "person__username"]
+    search_fields = [
+        "person__first_name",
+        "person__username",
+        "product_name",
+    ]
     ordering = ["-created"]
     raw_id_fields = ["person"]
 

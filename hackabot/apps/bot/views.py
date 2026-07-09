@@ -46,12 +46,27 @@ from .telegram import (
     send_chat_action,
     send_long,
     send_with_keyboard,
+    set_chat_member_tag,
     verify_webhook_secret,
 )
 
 BIO_MAX_LENGTH = 140
+PRODUCT_NAME_MAX_LENGTH = 16
 PROOF_WINDOW_SECONDS = 15
 STALE_PENDING_HOURS = 1
+MRR_PROOF_REQUEST = (
+    "To verify your MRR, please reply with a link to your public"
+    " Stripe MRR chart (create one from your Stripe dashboard"
+    " chart via Share).\n\n"
+    "It looks like: https://profile.stripe.com/yourcompany/AbC123"
+    "\n\n"
+    "No Stripe? Send a screenshot or short video of your revenue"
+    " dashboard and an admin will review it.\n\n"
+    "_We don't save your revenue data, it's only used to"
+    " evaluate your request to join the group. You can delete"
+    " the shared link afterwards from your Stripe dashboard"
+    " under Settings → Stripe Profiles._"
+)
 
 if settings.IS_PRODUCTION:
     PHOTO_UPLOAD_CHAT_ID = -1002257954378
@@ -117,6 +132,13 @@ def _onboard_new_member(person, group):
     print(f"✅ Onboarding complete for {person.first_name}")
 
 
+def _tag_for_telegram(product_name):
+    tag = (product_name or "").strip()
+    if not tag:
+        return ""
+    return tag[:PRODUCT_NAME_MAX_LENGTH]
+
+
 def _welcome_mrr_member(person, group):
     membership, _ = GroupPerson.objects.get_or_create(
         group=group, person=person
@@ -145,6 +167,21 @@ def _welcome_mrr_member(person, group):
     except HTTPError:
         print(f"⚠️ Could not welcome {person.first_name} to MRR group")
         return
+
+    join_request = JoinRequest.objects.filter(
+        person=person,
+        chat_id=group.telegram_id,
+        status=JoinRequest.STATUS_APPROVED,
+    ).first()
+    tag = _tag_for_telegram(join_request.product_name if join_request else "")
+    if tag:
+        try:
+            set_chat_member_tag(group.telegram_id, person.telegram_id, tag)
+        except HTTPError:
+            print(
+                f"⚠️ Could not set product tag for"
+                f" {person.first_name}: {tag!r}"
+            )
 
     membership.welcomed = True
     membership.save(update_fields=["welcomed"])
@@ -613,6 +650,10 @@ def _handle_dm(message_data):
         ],
     ).first()
     if join_request and join_request.status == JoinRequest.STATUS_PENDING:
+        if not join_request.product_name:
+            print("📩 DM is product name for a pending join request")
+            _handle_join_request_product_name(message_data, join_request)
+            return
         print("📩 DM is proof for a pending join request")
         _handle_join_request_proof(message_data, join_request)
         return
@@ -975,6 +1016,7 @@ def _handle_chat_join_request(join_request_data):
         chat_id=chat_id,
         defaults=dict(
             status=JoinRequest.STATUS_PENDING,
+            product_name="",
             proof_text="",
             reason="",
             proof_started_at=None,
@@ -988,17 +1030,9 @@ def _handle_chat_join_request(join_request_data):
         send(
             user_chat_id,
             "👋 Hey! You've requested to join the *$10k MRR* group.\n\n"
-            "To verify your MRR, please reply with a link to your public"
-            " Stripe MRR chart (create one from your Stripe dashboard"
-            " chart via Share).\n\n"
-            "It looks like: https://profile.stripe.com/yourcompany/AbC123"
-            "\n\n"
-            "No Stripe? Send a screenshot or short video of your revenue"
-            " dashboard and an admin will review it.\n\n"
-            "_We don't save your revenue data, it's only used to"
-            " evaluate your request to join the group. You can delete"
-            " the shared link afterwards from your Stripe dashboard"
-            " under Settings → Stripe Profiles._",
+            "First, reply with *only the name of your product*"
+            f" (max {PRODUCT_NAME_MAX_LENGTH} characters, no emoji)."
+            " We'll attach it as your tag in the group.",
         )
     except HTTPError:
         print("⚠️ Could not DM requester, routing to admin review")
@@ -1031,6 +1065,7 @@ def _expire_join_request(join_request):
         print(f"⚠️ Could not decline stale join request #{join_request.id}")
     join_request.status = JoinRequest.STATUS_DECLINED
     join_request.reason = "expired: no proof submitted"
+    join_request.product_name = ""
     join_request.proof_text = ""
     join_request.pending_since = None
     join_request.admin_message_ids = []
@@ -1041,8 +1076,8 @@ def _expire_join_request(join_request):
         "⏳ Your request to join the *$10k MRR* group timed out"
         " because we didn't get proof of your MRR.\n\n"
         "No worries, you can request to join again any time. Just"
-        " have your Stripe MRR link or a screenshot of your revenue"
-        " dashboard ready to send.",
+        " have your product name and Stripe MRR link or a"
+        " screenshot of your revenue dashboard ready to send.",
     )
 
 
@@ -1144,6 +1179,55 @@ def _handle_additional_proof(message_data, join_request):
 
     if extra_id:
         _append_admin_evidence(join_request.id, extra_id)
+
+
+def _is_valid_product_name(name):
+    if not name:
+        return False
+    if len(name) > PRODUCT_NAME_MAX_LENGTH:
+        return False
+    if "\n" in name or "\r" in name:
+        return False
+    # Telegram rejects emoji in member tags
+    if re.search(
+        r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF"
+        r"\U0001F600-\U0001F64F\U00002600-\U000026FF]",
+        name,
+    ):
+        return False
+    return True
+
+
+def _handle_join_request_product_name(message_data, join_request):
+    chat_id = message_data["chat"]["id"]
+    text = (
+        message_data.get("text") or message_data.get("caption") or ""
+    ).strip()
+    has_media = any(
+        key in message_data
+        for key in [
+            "photo",
+            "video",
+            "document",
+            "animation",
+            "video_note",
+        ]
+    )
+    if has_media or not _is_valid_product_name(text):
+        _notify_requester(
+            chat_id,
+            "Please reply with *only the name of your product*"
+            f" (max {PRODUCT_NAME_MAX_LENGTH} characters, no emoji).",
+        )
+        return
+
+    join_request.product_name = text
+    join_request.save(update_fields=["product_name"])
+    print(f"🏷️ Join request #{join_request.id} product: {text!r}")
+    _notify_requester(
+        chat_id,
+        f"Got it — *{_md_escape(text)}*.\n\n{MRR_PROOF_REQUEST}",
+    )
 
 
 def _handle_join_request_proof(message_data, join_request):
@@ -1254,9 +1338,13 @@ def _send_join_request_review(
             ),
         ]
     ]
+    product = join_request.product_name
+    product_line = (
+        f"\nProduct: {_md_escape(product)}" if product else ""
+    )
     header = (
         f"🔎 *Join request* from {_md_escape(str(person))} for the"
-        " $10k MRR group.\n\n"
+        f" $10k MRR group.{product_line}\n\n"
         f"Reason for review: {_md_escape(reason)}"
     )
 
