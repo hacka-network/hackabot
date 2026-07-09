@@ -244,6 +244,99 @@ class TestSend:
             with pytest.raises(requests.HTTPError):
                 send(12345, "Hello!")
 
+    @responses.activate
+    def test_send_retries_after_supergroup_migration(self, db):
+        from hackabot.apps.bot import telegram
+        from hackabot.apps.bot.models import Group
+
+        Group.objects.create(telegram_id=12345, display_name="Old Group")
+
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={
+                    "ok": False,
+                    "error_code": 400,
+                    "description": "Bad Request: group chat was upgraded",
+                    "parameters": {"migrate_to_chat_id": -1009999},
+                },
+                status=400,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 2002}},
+                status=200,
+            )
+
+            message_id = send(12345, "Hello!")
+
+            assert message_id == 2002
+            assert len(responses.calls) == 2
+            retry_body = json.loads(responses.calls[1].request.body)
+            assert retry_body["chat_id"] == -1009999
+
+            group = Group.objects.get(telegram_id=-1009999)
+            assert group.display_name == "Old Group"
+            assert not Group.objects.filter(telegram_id=12345).exists()
+
+
+class TestMigrateGroupChatId:
+    def test_updates_existing_group_in_place(self, db):
+        from hackabot.apps.bot.models import Group, Node
+        from hackabot.apps.bot.telegram import migrate_group_chat_id
+
+        group = Group.objects.create(telegram_id=111, display_name="G")
+        node = Node.objects.create(
+            group=group,
+            name="N",
+            emoji="🚀",
+            location="Town",
+            timezone="UTC",
+            established=2023,
+        )
+
+        migrate_group_chat_id(111, 222)
+
+        group.refresh_from_db()
+        assert group.telegram_id == 222
+        node.refresh_from_db()
+        assert node.group_id == group.id
+
+    def test_deletes_empty_duplicate_and_keeps_data(self, db):
+        from hackabot.apps.bot.models import Group, Node
+        from hackabot.apps.bot.telegram import migrate_group_chat_id
+
+        old = Group.objects.create(telegram_id=111, display_name="Real")
+        Node.objects.create(
+            group=old,
+            name="N",
+            emoji="🚀",
+            location="Town",
+            timezone="UTC",
+            established=2023,
+        )
+        Group.objects.create(telegram_id=222, display_name="Dup")
+
+        migrate_group_chat_id(111, 222)
+
+        assert not Group.objects.filter(telegram_id=111).exists()
+        survivor = Group.objects.get(telegram_id=222)
+        assert survivor.id == old.id
+        assert survivor.display_name == "Real"
+        assert Node.objects.filter(group=survivor).count() == 1
+
+    def test_noop_when_old_group_missing(self, db):
+        from hackabot.apps.bot.models import Group
+        from hackabot.apps.bot.telegram import migrate_group_chat_id
+
+        migrate_group_chat_id(111, 222)
+
+        assert not Group.objects.filter(telegram_id__in=[111, 222]).exists()
+
 
 class TestSplitMessage:
     def test_short_message_single_chunk(self):

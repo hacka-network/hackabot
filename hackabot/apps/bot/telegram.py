@@ -36,6 +36,29 @@ def _raise_for_status(resp):
         ) from e
 
 
+def _migrated_chat_id(resp):
+    if resp.ok:
+        return None
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    parameters = data.get("parameters") or dict()
+    return parameters.get("migrate_to_chat_id")
+
+
+def migrate_group_chat_id(old_chat_id, new_chat_id):
+    group = Group.objects.filter(telegram_id=old_chat_id).first()
+    if not group:
+        return
+    duplicate = Group.objects.filter(telegram_id=new_chat_id).first()
+    if duplicate and duplicate.id != group.id:
+        duplicate.delete()
+    group.telegram_id = new_chat_id
+    group.save(update_fields=["telegram_id"])
+    print(f"♻️ Migrated group {old_chat_id} → {new_chat_id}")
+
+
 TESTING = "pytest" in sys.modules
 
 if TESTING:
@@ -172,6 +195,11 @@ def send(chat_id, text, parse_mode="Markdown"):
         payload["parse_mode"] = parse_mode
     resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
     print(f"📥 sendMessage response: {resp.text}")
+    new_chat_id = _migrated_chat_id(resp)
+    if new_chat_id is not None:
+        print(f"♻️ Chat {chat_id} migrated to {new_chat_id}, retrying")
+        migrate_group_chat_id(chat_id, new_chat_id)
+        return send(new_chat_id, text, parse_mode)
     _raise_for_status(resp)
     print("✅ Message sent successfully")
     return resp.json().get("result", {}).get("message_id")

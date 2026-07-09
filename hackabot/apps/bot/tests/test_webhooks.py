@@ -2832,3 +2832,66 @@ class TestTimeoutCommand:
 
         assert response.status_code == 200
         assert len(restrictions) == 0
+
+
+class TestWebhookChatMigration:
+    def test_migrate_to_chat_id_updates_group(self, client, db):
+        Group.objects.create(telegram_id=-1001234567890, display_name="G")
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 3001,
+                "message": {
+                    "message_id": 5,
+                    "chat": {
+                        "id": -1001234567890,
+                        "type": "group",
+                        "title": "G",
+                    },
+                    "date": 1704067200,
+                    "migrate_to_chat_id": -1009999999999,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert (
+            Group.objects.get(telegram_id=-1009999999999).display_name == "G"
+        )
+        assert not Group.objects.filter(telegram_id=-1001234567890).exists()
+
+    def test_migrate_from_chat_id_merges_duplicate(self, client, db):
+        old = Group.objects.create(telegram_id=-100111, display_name="Real")
+        Node.objects.create(
+            group=old,
+            name="N",
+            emoji="🚀",
+            location="Town",
+            timezone="UTC",
+            established=2023,
+        )
+        Group.objects.create(telegram_id=-100222, display_name="Dup")
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 3002,
+                "message": {
+                    "message_id": 6,
+                    "chat": {
+                        "id": -100222,
+                        "type": "supergroup",
+                        "title": "Real",
+                    },
+                    "date": 1704067200,
+                    "migrate_from_chat_id": -100111,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert not Group.objects.filter(telegram_id=-100111).exists()
+        survivor = Group.objects.get(telegram_id=-100222)
+        assert survivor.id == old.id
+        assert Node.objects.filter(group=survivor).count() == 1

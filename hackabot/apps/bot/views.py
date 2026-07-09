@@ -41,6 +41,7 @@ from .telegram import (
     download_file,
     edit_message_text,
     is_chat_admin,
+    migrate_group_chat_id,
     restrict_chat_member,
     send,
     send_chat_action,
@@ -219,6 +220,19 @@ def _get_or_create_group(chat_data):
 def _handle_message(message_data):
     print("💬 Handling group message...")
     chat_data = message_data.get("chat")
+
+    migrate_to = message_data.get("migrate_to_chat_id")
+    if migrate_to is not None and chat_data:
+        print(f"♻️ Chat {chat_data['id']} upgraded to {migrate_to}")
+        migrate_group_chat_id(chat_data["id"], migrate_to)
+        return
+
+    migrate_from = message_data.get("migrate_from_chat_id")
+    if migrate_from is not None and chat_data:
+        print(f"♻️ Chat {migrate_from} upgraded to {chat_data['id']}")
+        migrate_group_chat_id(migrate_from, chat_data["id"])
+        return
+
     group = _get_or_create_group(chat_data)
     if not group:
         print("⚠️ No valid group found, skipping message")
