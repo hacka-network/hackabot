@@ -55,16 +55,23 @@ PRODUCT_NAME_MAX_LENGTH = 16
 PROOF_WINDOW_SECONDS = 15
 STALE_PENDING_HOURS = 1
 MRR_PROOF_REQUEST = (
-    "To verify your MRR, please reply with a link to your public"
-    " Stripe MRR chart (create one from your Stripe dashboard"
-    " chart via Share).\n\n"
-    "It looks like: https://profile.stripe.com/yourcompany/AbC123"
-    "\n\n"
-    "No Stripe? Send a screenshot or short video of your revenue"
-    " dashboard and an admin will review it.\n\n"
+    "Now I just need proof you're doing *$10k+ a month*. It"
+    " doesn't have to be recurring: subscriptions, one-time"
+    " sales, license fees, ad revenue, anything that adds up to"
+    " $10k+ in a month all counts.\n\n"
+    "📸 *Just send a screenshot* of your revenue (a short video"
+    " works too) and an admin will review it. For example your"
+    " Stripe gross volume, Paddle, Lemon Squeezy, Gumroad,"
+    " Polar, PayPal, the App Store or Play Console, or"
+    " AdSense.\n\n"
+    "If your $10k+ is recurring revenue on Stripe, you can"
+    " instead drop a link to your public Stripe MRR chart and"
+    " it'll be auto-approved instantly. Create it from a Stripe"
+    " dashboard chart via Share, it looks like:"
+    " https://profile.stripe.com/yourcompany/AbC123\n\n"
     "_We don't save your revenue data, it's only used to"
-    " evaluate your request to join the group. You can delete"
-    " the shared link afterwards from your Stripe dashboard"
+    " evaluate your request to join. If you share a Stripe link"
+    " you can delete it afterwards from your Stripe dashboard"
     " under Settings → Stripe Profiles._"
 )
 
@@ -1075,14 +1082,16 @@ def _expire_join_request(join_request):
     join_request.admin_message_ids = []
     join_request.save()
     print(f"⏳ Expired stale join request #{join_request.id} for {person}")
-    _notify_requester(
-        person.telegram_id,
+    timeout_message = (
         "⏳ Your request to join the *$10k MRR* group timed out"
         " because we didn't get proof of your MRR.\n\n"
         "No worries, you can request to join again any time. Just"
         " have your product name and Stripe MRR link or a"
-        " screenshot of your revenue dashboard ready to send.",
+        " screenshot of your revenue dashboard ready to send."
     )
+    if settings.MRR_10K_INVITE_LINK:
+        timeout_message += f"\n\n{settings.MRR_10K_INVITE_LINK}"
+    _notify_requester(person.telegram_id, timeout_message)
 
 
 def _notify_requester(chat_id, text):

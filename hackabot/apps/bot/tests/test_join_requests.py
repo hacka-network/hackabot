@@ -335,9 +335,13 @@ class TestProductNameDM:
         assert join_request.product_name == "Stripe"
         assert join_request.status == JoinRequest.STATUS_PENDING
         assert len(sent_messages) == 1
-        assert "Got it" in sent_messages[0][1]
-        assert "Stripe" in sent_messages[0][1]
-        assert "profile.stripe.com" in sent_messages[0][1]
+        proof_dm = sent_messages[0][1]
+        assert "Got it" in proof_dm
+        assert "Stripe" in proof_dm
+        assert "profile.stripe.com" in proof_dm
+        assert "one-time" in proof_dm
+        assert "$10k" in proof_dm
+        assert "screenshot" in proof_dm
 
     def test_rejects_empty_product_name(self, client, db, sent_messages):
         pending_request(product_name="")
@@ -917,6 +921,16 @@ class TestExpireStaleJoinRequests:
         assert len(sent_messages) == 1
         assert sent_messages[0][0] == 555
         assert "timed out" in sent_messages[0][1]
+
+    def test_expiry_dm_includes_rejoin_link(
+        self, db, settings, declined, sent_messages
+    ):
+        settings.MRR_10K_INVITE_LINK = "https://t.me/+rejoinme"
+        self._stale_pending()
+
+        expire_stale_join_requests()
+
+        assert "https://t.me/+rejoinme" in sent_messages[0][1]
 
     def test_fresh_pending_untouched(self, db, declined, sent_messages):
         join_request = pending_request()
