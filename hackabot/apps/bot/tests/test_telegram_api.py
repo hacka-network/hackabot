@@ -469,6 +469,66 @@ class TestSendPoll:
             assert "Thursday" in poll.question
 
     @responses.activate
+    def test_send_poll_retries_after_supergroup_migration(self, db, node):
+        from hackabot.apps.bot.models import Group
+
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendPoll",
+                json={
+                    "ok": False,
+                    "error_code": 400,
+                    "description": "Bad Request: group chat was upgraded",
+                    "parameters": {"migrate_to_chat_id": -1009999},
+                },
+                status=400,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendPoll",
+                json={
+                    "ok": True,
+                    "result": {
+                        "message_id": 1002,
+                        "poll": {"id": "poll_migrated", "question": "q"},
+                    },
+                },
+                status=200,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/pinChatMessage",
+                json={"ok": True, "result": True},
+                status=200,
+            )
+
+            send_poll(node, send_invite=False)
+
+            assert Group.objects.filter(telegram_id=-1009999).exists()
+            assert not Group.objects.filter(
+                telegram_id=-1001234567890
+            ).exists()
+
+            poll_calls = [
+                c for c in responses.calls if "sendPoll" in c.request.url
+            ]
+            assert len(poll_calls) == 2
+            assert (
+                json.loads(poll_calls[1].request.body)["chat_id"] == -1009999
+            )
+
+            pin_calls = [
+                c for c in responses.calls if "pinChatMessage" in c.request.url
+            ]
+            assert json.loads(pin_calls[0].request.body)["chat_id"] == -1009999
+            assert Poll.objects.filter(telegram_id="poll_migrated").exists()
+
+    @responses.activate
     def test_send_poll_custom_day(self, db, node):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram

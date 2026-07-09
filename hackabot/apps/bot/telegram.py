@@ -99,6 +99,20 @@ def _get_bot_token():
     return token
 
 
+def _post_chat(method, payload):
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/{method}"
+    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+    new_chat_id = _migrated_chat_id(resp)
+    if new_chat_id is not None and "chat_id" in payload:
+        old_chat_id = payload["chat_id"]
+        print(f"♻️ Chat {old_chat_id} migrated to {new_chat_id}, retrying")
+        migrate_group_chat_id(old_chat_id, new_chat_id)
+        payload["chat_id"] = new_chat_id
+        resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+    return resp
+
+
 def verify_webhook():
     token = _get_bot_token()
 
@@ -184,8 +198,6 @@ def send_long(chat_id, text):
 def send(chat_id, text, parse_mode="Markdown"):
     print(f"📤 Calling Telegram API: sendMessage to chat {chat_id}")
     print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")
-    token = _get_bot_token()
-    url = f"{TELEGRAM_API_BASE}/{token}/sendMessage"
     payload = dict(
         chat_id=chat_id,
         text=text,
@@ -193,13 +205,8 @@ def send(chat_id, text, parse_mode="Markdown"):
     )
     if parse_mode:
         payload["parse_mode"] = parse_mode
-    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+    resp = _post_chat("sendMessage", payload)
     print(f"📥 sendMessage response: {resp.text}")
-    new_chat_id = _migrated_chat_id(resp)
-    if new_chat_id is not None:
-        print(f"♻️ Chat {chat_id} migrated to {new_chat_id}, retrying")
-        migrate_group_chat_id(chat_id, new_chat_id)
-        return send(new_chat_id, text, parse_mode)
     _raise_for_status(resp)
     print("✅ Message sent successfully")
     return resp.json().get("result", {}).get("message_id")
@@ -210,18 +217,15 @@ def send_with_keyboard(chat_id, text, keyboard):
         f"📤 Calling Telegram API: sendMessage with keyboard to chat {chat_id}"
     )
     print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")
-    token = _get_bot_token()
-    url = f"{TELEGRAM_API_BASE}/{token}/sendMessage"
-    resp = requests.post(
-        url,
-        json=dict(
+    resp = _post_chat(
+        "sendMessage",
+        dict(
             chat_id=chat_id,
             parse_mode="Markdown",
             text=text,
             disable_web_page_preview=True,
             reply_markup=dict(inline_keyboard=keyboard),
         ),
-        timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 sendMessage response: {resp.text}")
     _raise_for_status(resp)
@@ -375,19 +379,17 @@ def send_poll(node, when="Thursday", send_invite=True):
     print(f"📊 Sending poll to {name} (chat {chat_id})")
     print(f"📤 Calling Telegram API: sendPoll")
     token = _get_bot_token()
-    resp = requests.post(
-        f"{TELEGRAM_API_BASE}/{token}/sendPoll",
-        json=dict(
-            chat_id=chat_id,
-            question=f"Who's coming to {name} this {when}?",
-            options=["✅  Yes", "👎  Not this week"],
-            is_anonymous=False,
-            allows_multiple_answers=False,
-        ),
-        timeout=REQUEST_TIMEOUT,
+    poll_payload = dict(
+        chat_id=chat_id,
+        question=f"Who's coming to {name} this {when}?",
+        options=["✅  Yes", "👎  Not this week"],
+        is_anonymous=False,
+        allows_multiple_answers=False,
     )
+    resp = _post_chat("sendPoll", poll_payload)
     print(f"📥 sendPoll response: {resp.text}")
     _raise_for_status(resp)
+    chat_id = poll_payload["chat_id"]
     print("✅ Poll sent successfully")
     obj = resp.json()
     result = obj["result"]
