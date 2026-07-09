@@ -5,10 +5,13 @@ import pytest
 import responses
 from django.test import Client
 from django.utils import timezone as django_timezone
-from requests import HTTPError
+from requests import HTTPError, Timeout
 
 from hackabot.apps.bot.models import Group, GroupPerson, JoinRequest, Person
-from hackabot.apps.bot.views import expire_stale_join_requests
+from hackabot.apps.bot.views import (
+    _is_valid_product_name,
+    expire_stale_join_requests,
+)
 from hackabot.apps.bot.stripe_mrr import (
     FX_RATES_URL,
     _fx_cache,
@@ -362,6 +365,14 @@ class TestProductNameDM:
         join_request = JoinRequest.objects.get()
         assert join_request.product_name == ""
         assert "only the name of your product" in sent_messages[0][1]
+
+    def test_validation_rejects_emoji_variants(self):
+        bad = ["🚀", "🇺🇸", "1️⃣", "™️", "©️", "⭐", "Acme🔥", "↔️"]
+        for text in bad:
+            assert not _is_valid_product_name(text), text
+        good = ["Acme", "Acme Corp", "café", "日本語", "A-B_C.io"]
+        for text in good:
+            assert _is_valid_product_name(text), text
 
     def test_rejects_photo_as_product_name(
         self, client, db, sent_messages, sent_keyboards
@@ -1066,6 +1077,71 @@ class TestMrrWelcome:
             person__telegram_id=555, group__telegram_id=MRR_CHAT_ID
         )
         assert membership.welcomed is True
+
+    def test_tag_network_error_still_welcomes(
+        self, client, db, sent_messages, monkeypatch
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_APPROVED,
+            product_name="Acme",
+        )
+
+        def raise_timeout(chat_id, user_id, tag):
+            raise Timeout("connection timed out")
+
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.set_chat_member_tag",
+            raise_timeout,
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        membership = GroupPerson.objects.get(
+            person__telegram_id=555, group__telegram_id=MRR_CHAT_ID
+        )
+        assert membership.welcomed is True
+
+    def test_sets_tag_before_request_marked_approved(
+        self, client, db, sent_messages, tagged
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_REVIEW,
+            product_name="Acme",
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        assert tagged == [(MRR_CHAT_ID, 555, "Acme")]
+
+    def test_no_tag_for_declined_request(
+        self, client, db, sent_messages, tagged
+    ):
+        person = Person.objects.create(
+            telegram_id=555, first_name="Bob", username="bob10k"
+        )
+        JoinRequest.objects.create(
+            person=person,
+            chat_id=MRR_CHAT_ID,
+            status=JoinRequest.STATUS_DECLINED,
+            product_name="Acme",
+        )
+
+        post_webhook(client, chat_member_update(username="bob10k"))
+
+        assert len(sent_messages) == 1
+        assert tagged == []
 
     def test_welcomes_joiner_without_username(self, client, db, sent_messages):
         post_webhook(

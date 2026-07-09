@@ -15,7 +15,7 @@ from django.http import HttpResponse, JsonResponse
 from django.utils import timezone as django_timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-from requests import HTTPError
+from requests import HTTPError, RequestException
 
 from .models import (
     ActivityDay,
@@ -168,16 +168,20 @@ def _welcome_mrr_member(person, group):
         print(f"⚠️ Could not welcome {person.first_name} to MRR group")
         return
 
-    join_request = JoinRequest.objects.filter(
-        person=person,
-        chat_id=group.telegram_id,
-        status=JoinRequest.STATUS_APPROVED,
-    ).first()
+    join_request = (
+        JoinRequest.objects.filter(
+            person=person,
+            chat_id=group.telegram_id,
+        )
+        .exclude(status=JoinRequest.STATUS_DECLINED)
+        .order_by("-created")
+        .first()
+    )
     tag = _tag_for_telegram(join_request.product_name if join_request else "")
     if tag:
         try:
             set_chat_member_tag(group.telegram_id, person.telegram_id, tag)
-        except HTTPError:
+        except RequestException:
             print(
                 f"⚠️ Could not set product tag for"
                 f" {person.first_name}: {tag!r}"
@@ -1188,10 +1192,23 @@ def _is_valid_product_name(name):
         return False
     if "\n" in name or "\r" in name:
         return False
-    # Telegram rejects emoji in member tags
+    # Telegram rejects emoji in member tags. Cover the emoji planes plus
+    # the pieces that build emoji from otherwise-plain characters: flags
+    # (regional indicators), variation selectors, the zero-width joiner
+    # and the combining keycap mark.
     if re.search(
-        r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF"
-        r"\U0001F600-\U0001F64F\U00002600-\U000026FF]",
+        r"["
+        r"\U0000200D"
+        r"\U000020E3"
+        r"\U0000FE00-\U0000FE0F"
+        r"\U000000A9\U000000AE\U00002122\U00002139"
+        r"\U00002190-\U000021FF"
+        r"\U00002300-\U000023FF"
+        r"\U000025A0-\U000025FF"
+        r"\U00002600-\U000027BF"
+        r"\U00002B00-\U00002BFF"
+        r"\U0001F000-\U0001FAFF"
+        r"]",
         name,
     ):
         return False
@@ -1339,9 +1356,7 @@ def _send_join_request_review(
         ]
     ]
     product = join_request.product_name
-    product_line = (
-        f"\nProduct: {_md_escape(product)}" if product else ""
-    )
+    product_line = f"\nProduct: {_md_escape(product)}" if product else ""
     header = (
         f"🔎 *Join request* from {_md_escape(str(person))} for the"
         f" $10k MRR group.{product_line}\n\n"
