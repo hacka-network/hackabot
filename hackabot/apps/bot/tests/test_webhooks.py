@@ -1281,10 +1281,11 @@ class TestOnboarding:
         assert len(sent_messages) == 1
         chat_id, text = sent_messages[0]
         assert chat_id == -1001234567890
-        assert "Welcome" in text
+        assert "Hello" in text
         assert "Alice" in text
-        assert "Introduce yourself" in text
+        assert "introduce yourself" in text
         assert "DM me to set up your profile" in text
+        assert "[hacka.network](https://hacka.network)" in text
 
         person = Person.objects.get(telegram_id=12345)
         assert person.onboarded is True
@@ -1345,7 +1346,7 @@ class TestOnboarding:
 
         assert response.status_code == 200
         assert len(sent_messages) == 1
-        assert "Welcome" in sent_messages[0][1]
+        assert "Hello" in sent_messages[0][1]
 
     def test_bot_member_not_onboarded(self, client, db, monkeypatch):
         sent_messages = []
@@ -1469,7 +1470,7 @@ class TestOnboarding:
 
         assert response.status_code == 200
         assert len(sent_messages) == 1
-        assert "Welcome" in sent_messages[0][1]
+        assert "Hello" in sent_messages[0][1]
         assert "Alice" in sent_messages[0][1]
 
         person = Person.objects.get(telegram_id=12345)
@@ -1611,7 +1612,7 @@ class TestOnboarding:
 
         assert response.status_code == 200
         assert len(sent_messages) == 1
-        assert "Welcome" in sent_messages[0][1]
+        assert "Hello" in sent_messages[0][1]
 
     def test_member_without_first_name_gets_generic_welcome(
         self, client, db, monkeypatch
@@ -1654,7 +1655,7 @@ class TestOnboarding:
 
         assert response.status_code == 200
         assert len(sent_messages) == 1
-        assert "Welcome" in sent_messages[0][1]
+        assert "Hello" in sent_messages[0][1]
         assert "there" in sent_messages[0][1]
 
     def test_new_member_no_welcome_when_no_node(self, client, db, monkeypatch):

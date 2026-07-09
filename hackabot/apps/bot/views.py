@@ -128,9 +128,9 @@ def _onboard_new_member(person, group):
     mention = f"[{name}](tg://user?id={person.telegram_id})"
 
     message = (
-        f"👋 Welcome {mention}! "
-        "Introduce yourself — what are you building? "
-        "(DM me to set up your profile)"
+        f"Hello {mention}! Please introduce yourself and what "
+        "you're building (and you can DM me to set up your "
+        "profile for [hacka.network](https://hacka.network))"
     )
 
     send(group.telegram_id, message)
