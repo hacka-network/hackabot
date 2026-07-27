@@ -16,6 +16,7 @@ from hackabot.apps.bot.node_sync import (
     reconcile_nodes,
     sync_nodes_from_url,
     validate_entry,
+    valid_coord,
     valid_timezone,
 )
 
@@ -32,6 +33,8 @@ def make_entry(**overrides):
         location="Barcelona",
         timezone="Europe/Madrid",
         signup_url="https://hackalona.com",
+        lat=41.3874,
+        lon=2.1686,
     )
     entry.update(overrides)
     return entry
@@ -74,6 +77,22 @@ class TestValidTimezone:
         assert not valid_timezone("not a zone")
 
 
+class TestValidCoord:
+    def test_in_range(self):
+        assert valid_coord(41.3874, 90)
+        assert valid_coord(-90, 90)
+        assert valid_coord(180, 180)
+        assert valid_coord(0, 90)
+
+    def test_out_of_range(self):
+        assert not valid_coord(90.1, 90)
+        assert not valid_coord(-181, 180)
+
+    def test_non_numbers(self):
+        for bad in ["41.3874", None, True, False, [41]]:
+            assert not valid_coord(bad, 90)
+
+
 class TestValidateEntry:
     def test_valid_entry(self):
         name, cleaned, error = validate_entry(make_entry())
@@ -81,6 +100,36 @@ class TestValidateEntry:
         assert name == "Hackalona"
         assert cleaned["name"] == "Hackalona"
         assert cleaned["established"] == 2026
+        assert cleaned["lat"] == 41.3874
+        assert cleaned["lon"] == 2.1686
+
+    def test_missing_coords_rejected(self):
+        for field in ["lat", "lon"]:
+            entry = make_entry()
+            del entry[field]
+            name, cleaned, error = validate_entry(entry)
+            assert cleaned is None
+            assert "missing" in error
+
+    def test_out_of_range_coords_rejected(self):
+        name, cleaned, error = validate_entry(make_entry(lat=91))
+        assert cleaned is None
+        assert "lat" in error
+
+        name, cleaned, error = validate_entry(make_entry(lon=-181))
+        assert cleaned is None
+        assert "lon" in error
+
+    def test_string_coords_rejected(self):
+        name, cleaned, error = validate_entry(make_entry(lat="41.3874"))
+        assert cleaned is None
+        assert "lat" in error
+
+    def test_integer_coords_become_floats(self):
+        name, cleaned, error = validate_entry(make_entry(lat=41, lon=2))
+        assert error is None
+        assert cleaned["lat"] == 41.0
+        assert isinstance(cleaned["lat"], float)
 
     def test_name_is_stripped(self):
         name, cleaned, error = validate_entry(make_entry(name="  Hacka  "))
@@ -165,6 +214,8 @@ class TestReconcile:
         assert node.emoji == "🇪🇸"
         assert node.location == "Barcelona"
         assert node.timezone == "Europe/Madrid"
+        assert node.lat == 41.3874
+        assert node.lon == 2.1686
         assert node.group_id is None
         assert node.event_day == 3
         assert node.unlisted is False
@@ -186,6 +237,18 @@ class TestReconcile:
         node = Node.objects.get(name="Hackalona")
         assert node.location == "Barcelona"
         assert node.established == 2026
+        assert node.lat == 41.3874
+        assert node.lon == 2.1686
+
+    def test_moved_node_gets_new_coords(self, db):
+        reconcile_nodes(dict(nodes=[make_entry()]))
+        summary = reconcile_nodes(
+            dict(nodes=[make_entry(lat=39.4699, lon=-0.3763)])
+        )
+        assert summary["updated"] == 1
+        node = Node.objects.get(name="Hackalona")
+        assert node.lat == 39.4699
+        assert node.lon == -0.3763
 
     def test_unchanged_when_identical(self, db):
         reconcile_nodes(dict(nodes=[make_entry()]))
@@ -235,6 +298,8 @@ class TestReconcile:
             location="Barcelona",
             timezone="Europe/Madrid",
             signup_url="https://hackalona.com",
+            lat=41.3874,
+            lon=2.1686,
             unlisted=False,
             disabled=True,
         )

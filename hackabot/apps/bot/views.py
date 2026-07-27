@@ -1725,6 +1725,8 @@ def api_nodes(request):
             established=node.established,
             location=node.location,
             timezone=node.timezone,
+            lat=node.lat,
+            lon=node.lon,
             disabled=node.disabled,
             attending_count=_get_this_weeks_attending_count(node),
         )

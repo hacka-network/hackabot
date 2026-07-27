@@ -116,6 +116,12 @@ class Node(models.Model):
     timezone = models.CharField(
         max_length=50, default="UTC", help_text="e.g. Europe/Paris"
     )
+    lat = models.FloatField(
+        null=True, blank=True, help_text="Decimal degrees, e.g. 13.7379"
+    )
+    lon = models.FloatField(
+        null=True, blank=True, help_text="Decimal degrees, e.g. 100.5601"
+    )
     event_day = models.PositiveSmallIntegerField(
         default=3,
         help_text="Day of week for events (0=Monday, 4=Friday, etc.)",
@@ -150,6 +156,8 @@ class Node(models.Model):
             signup_url=self.signup_url,
             location=self.location,
             timezone=self.timezone,
+            lat=self.lat,
+            lon=self.lon,
             last_poll_sent_at=(
                 self.last_poll_sent_at.isoformat()
                 if self.last_poll_sent_at

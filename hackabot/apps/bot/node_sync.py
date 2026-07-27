@@ -17,8 +17,12 @@ REQUIRED_FIELDS = (
     "location",
     "timezone",
     "signup_url",
+    "lat",
+    "lon",
 )
 MIN_YEAR = 1970
+MAX_LAT = 90
+MAX_LON = 180
 MIN_ACTIVE_FOR_GUARD = 4
 MAX_DISABLE_FRACTION = 0.5
 FETCH_TIMEOUT = 15
@@ -49,6 +53,12 @@ def valid_timezone(tz):
     except (ZoneInfoNotFoundError, ValueError):
         return False
     return True
+
+
+def valid_coord(value, limit):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return -limit <= value <= limit
 
 
 def validate_entry(entry):
@@ -113,6 +123,14 @@ def validate_entry(entry):
     ):
         return name_out, None, "signup_url must be an https URL"
 
+    lat = entry["lat"]
+    if not valid_coord(lat, MAX_LAT):
+        return name_out, None, f"lat must be between -{MAX_LAT} and {MAX_LAT}"
+
+    lon = entry["lon"]
+    if not valid_coord(lon, MAX_LON):
+        return name_out, None, f"lon must be between -{MAX_LON} and {MAX_LON}"
+
     cleaned = dict(
         name=name.strip(),
         emoji=emoji,
@@ -120,6 +138,8 @@ def validate_entry(entry):
         location=location.strip(),
         timezone=tz,
         signup_url=url,
+        lat=float(lat),
+        lon=float(lon),
     )
     return name_out, cleaned, None
 
@@ -156,6 +176,8 @@ def apply_entry(cleaned):
             location=cleaned["location"],
             timezone=cleaned["timezone"],
             signup_url=cleaned["signup_url"],
+            lat=cleaned["lat"],
+            lon=cleaned["lon"],
             unlisted=False,
             disabled=False,
         )
@@ -169,6 +191,8 @@ def apply_entry(cleaned):
         "location",
         "timezone",
         "signup_url",
+        "lat",
+        "lon",
     ):
         if getattr(node, field) != cleaned[field]:
             setattr(node, field, cleaned[field])
