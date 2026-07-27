@@ -146,6 +146,16 @@ if SENTRY_DSN and not is_shell:
         send_default_pii=False,
     )
 
+# DB-IP City Lite, fetched into the slug by bin/post_compile. Absent from a
+# fresh checkout until manage.py fetch_geoip runs, which only means no node
+# gets flagged as nearest.
+GEOIP_DB_PATH = os.environ.get(
+    "GEOIP_DB_PATH", str(BASE_DIR / "data" / "dbip-city-lite.mmdb")
+)
+DBIP_URL_TEMPLATE = (
+    "https://download.db-ip.com/free/dbip-city-lite-{month}.mmdb.gz"
+)
+
 # Node roster sync (nodes.json lives in the hacka.network site repo)
 NODES_JSON_URL = os.environ.get(
     "NODES_JSON_URL",

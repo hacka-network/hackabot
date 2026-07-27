@@ -28,6 +28,7 @@ from .models import (
     Poll,
     PollAnswer,
 )
+from .geo import nearest_node
 from .node_sync import sync_nodes_from_url
 from .stripe_mrr import extract_stripe_link, verify_mrr
 from .telegram import (
@@ -1715,6 +1716,7 @@ def api_nodes(request):
 
     nodes_data = []
     node_attending_map = {}
+    nearest = nearest_node(request, nodes)
 
     for node in nodes:
         node_data = dict(
@@ -1728,6 +1730,7 @@ def api_nodes(request):
             lat=node.lat,
             lon=node.lon,
             disabled=node.disabled,
+            nearest=nearest is not None and node.id == nearest.id,
             attending_count=_get_this_weeks_attending_count(node),
         )
         nodes_data.append(node_data)
@@ -1862,6 +1865,9 @@ def api_nodes(request):
     response = JsonResponse(
         dict(nodes=nodes_data, people=people_list, stats=stats)
     )
+    # The nearest flag is derived from the caller's IP, so this response is
+    # specific to one visitor and must never be served to another.
+    response["Cache-Control"] = "private, no-store"
     return _cors_response(response)
 
 

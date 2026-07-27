@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Fetches DB-IP City Lite into the slug, so web dynos can map a visitor's IP
+# to coordinates. Non-fatal on purpose: db-ip.com being down must not block
+# an unrelated deploy, and the app reports the missing file to Sentry.
+#
+# The filename carries the month and next month's file 404s until it is
+# published, so try this month and fall back to last month.
+
+set -uo pipefail
+
+TARGET_DIR="data"
+TARGET="${TARGET_DIR}/dbip-city-lite.mmdb"
+
+mkdir -p "${TARGET_DIR}"
+
+for offset in 0 1; do
+  if [ "${offset}" -eq 0 ]; then
+    month=$(date -u +%Y-%m)
+  else
+    month=$(date -u -d "-1 month" +%Y-%m 2>/dev/null \
+      || date -u -v-1m +%Y-%m)
+  fi
+
+  url="https://download.db-ip.com/free/dbip-city-lite-${month}.mmdb.gz"
+  echo "-----> Fetching GeoIP database for ${month}"
+
+  if curl -fsS --retry 2 --max-time 180 "${url}" | gunzip > "${TARGET}"; then
+    echo "-----> GeoIP database ready ($(du -h "${TARGET}" | cut -f1))"
+    exit 0
+  fi
+
+  echo "-----> ${month} unavailable"
+done
+
+rm -f "${TARGET}"
+echo "-----> WARNING: no GeoIP database, nearest-node flagging is off"
+exit 0

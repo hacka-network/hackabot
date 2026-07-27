@@ -211,3 +211,6 @@ staticfiles/
 
 # Old swellbot code (can be removed after migration)
 swellbot/
+
+# GeoIP database, fetched by bin/post_compile / manage.py fetch_geoip
+data/*.mmdb
