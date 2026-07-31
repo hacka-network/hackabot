@@ -1,10 +1,12 @@
 import hmac
 import os
 import sys
+import time
 from collections import defaultdict
 from datetime import timedelta
 
 import requests
+import sentry_sdk
 from django.conf import settings
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
@@ -21,6 +23,9 @@ from .models import (
 )
 
 REQUEST_TIMEOUT = 30
+TELEGRAM_RETRY_ATTEMPTS = 2
+# Give up rather than stall the caller when Telegram demands a long wait
+TELEGRAM_RETRY_AFTER_MAX = 60
 # Fullwidth asterisk (U+FF0A) so the whole title can sit inside a Markdown
 # bold range — Telegram's MD V1 parser doesn't reliably handle \* inside *…*.
 HACKA_BOLD = "Hacka＊"
@@ -34,6 +39,38 @@ def _raise_for_status(resp):
             f"{e.response.status_code} {e.response.reason}: {e.response.text}",
             response=e.response,
         ) from e
+
+
+def _retry_after_seconds(resp):
+    if resp.status_code != 429:
+        return None
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    parameters = data.get("parameters") or dict()
+    return parameters.get("retry_after")
+
+
+def _telegram_request(method, url, **kwargs):
+    kwargs.setdefault("timeout", REQUEST_TIMEOUT)
+    resp = requests.request(method, url, **kwargs)
+    for _ in range(TELEGRAM_RETRY_ATTEMPTS):
+        wait = _retry_after_seconds(resp)
+        if wait is None or wait > TELEGRAM_RETRY_AFTER_MAX:
+            break
+        print(f"⏳ Telegram flood control, retrying in {wait}s")
+        time.sleep(wait)
+        resp = requests.request(method, url, **kwargs)
+    return resp
+
+
+def _telegram_post(url, payload, **kwargs):
+    return _telegram_request("post", url, json=payload, **kwargs)
+
+
+def _telegram_get(url, **kwargs):
+    return _telegram_request("get", url, **kwargs)
 
 
 def _migrated_chat_id(resp):
@@ -102,14 +139,14 @@ def _get_bot_token():
 def _post_chat(method, payload):
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/{method}"
-    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+    resp = _telegram_post(url, payload)
     new_chat_id = _migrated_chat_id(resp)
     if new_chat_id is not None and "chat_id" in payload:
         old_chat_id = payload["chat_id"]
         print(f"♻️ Chat {old_chat_id} migrated to {new_chat_id}, retrying")
         migrate_group_chat_id(old_chat_id, new_chat_id)
         payload["chat_id"] = new_chat_id
-        resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+        resp = _telegram_post(url, payload)
     return resp
 
 
@@ -118,10 +155,7 @@ def verify_webhook():
 
     # Get current webhook info
     print("📤 Calling Telegram API: getWebhookInfo")
-    resp = requests.get(
-        f"{TELEGRAM_API_BASE}/{token}/getWebhookInfo",
-        timeout=REQUEST_TIMEOUT,
-    )
+    resp = _telegram_get(f"{TELEGRAM_API_BASE}/{token}/getWebhookInfo")
     _raise_for_status(resp)
     info = resp.json()
     print(f"📥 getWebhookInfo response: {info}")
@@ -145,11 +179,7 @@ def verify_webhook():
     )
     if TELEGRAM_WEBHOOK_SECRET:
         payload["secret_token"] = TELEGRAM_WEBHOOK_SECRET
-    resp = requests.post(
-        f"{TELEGRAM_API_BASE}/{token}/setWebhook",
-        json=payload,
-        timeout=REQUEST_TIMEOUT,
-    )
+    resp = _telegram_post(f"{TELEGRAM_API_BASE}/{token}/setWebhook", payload)
     _raise_for_status(resp)
     result = resp.json()
     print(f"📥 setWebhook response: {result}")
@@ -240,7 +270,7 @@ def answer_callback_query(callback_query_id, text=None):
     payload = dict(callback_query_id=callback_query_id)
     if text:
         payload["text"] = text
-    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+    resp = _telegram_post(url, payload)
     print(f"📥 answerCallbackQuery response: {resp.text}")
     _raise_for_status(resp)
     print("✅ Callback query answered")
@@ -250,11 +280,7 @@ def export_chat_invite_link(chat_id):
     print(f"📤 Calling Telegram API: exportChatInviteLink for chat {chat_id}")
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/exportChatInviteLink"
-    resp = requests.post(
-        url,
-        json=dict(chat_id=chat_id),
-        timeout=REQUEST_TIMEOUT,
-    )
+    resp = _telegram_post(url, dict(chat_id=chat_id))
     print(f"📥 exportChatInviteLink response: {resp.text}")
     _raise_for_status(resp)
     result = resp.json()
@@ -268,11 +294,7 @@ def approve_chat_join_request(chat_id, user_id):
     )
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/approveChatJoinRequest"
-    resp = requests.post(
-        url,
-        json=dict(chat_id=chat_id, user_id=user_id),
-        timeout=REQUEST_TIMEOUT,
-    )
+    resp = _telegram_post(url, dict(chat_id=chat_id, user_id=user_id))
     print(f"📥 approveChatJoinRequest response: {resp.text}")
     _raise_for_status(resp)
     print("✅ Join request approved")
@@ -285,11 +307,7 @@ def decline_chat_join_request(chat_id, user_id):
     )
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/declineChatJoinRequest"
-    resp = requests.post(
-        url,
-        json=dict(chat_id=chat_id, user_id=user_id),
-        timeout=REQUEST_TIMEOUT,
-    )
+    resp = _telegram_post(url, dict(chat_id=chat_id, user_id=user_id))
     print(f"📥 declineChatJoinRequest response: {resp.text}")
     _raise_for_status(resp)
     print("✅ Join request declined")
@@ -302,11 +320,7 @@ def set_chat_member_tag(chat_id, user_id, tag):
     )
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/setChatMemberTag"
-    resp = requests.post(
-        url,
-        json=dict(chat_id=chat_id, user_id=user_id, tag=tag),
-        timeout=REQUEST_TIMEOUT,
-    )
+    resp = _telegram_post(url, dict(chat_id=chat_id, user_id=user_id, tag=tag))
     print(f"📥 setChatMemberTag response: {resp.text}")
     _raise_for_status(resp)
     print(f"✅ Member tag set to {tag!r}")
@@ -328,7 +342,7 @@ def copy_message(chat_id, from_chat_id, message_id, caption, keyboard=None):
     )
     if keyboard:
         payload["reply_markup"] = dict(inline_keyboard=keyboard)
-    resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+    resp = _telegram_post(url, payload)
     print(f"📥 copyMessage response: {resp.text}")
     _raise_for_status(resp)
     return resp.json().get("result", {}).get("message_id")
@@ -341,11 +355,7 @@ def delete_message(chat_id, message_id):
     )
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/deleteMessage"
-    resp = requests.post(
-        url,
-        json=dict(chat_id=chat_id, message_id=message_id),
-        timeout=REQUEST_TIMEOUT,
-    )
+    resp = _telegram_post(url, dict(chat_id=chat_id, message_id=message_id))
     print(f"📥 deleteMessage response: {resp.text}")
     _raise_for_status(resp)
 
@@ -357,16 +367,15 @@ def edit_message_text(chat_id, message_id, text):
     )
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/editMessageText"
-    resp = requests.post(
+    resp = _telegram_post(
         url,
-        json=dict(
+        dict(
             chat_id=chat_id,
             message_id=message_id,
             text=text,
             parse_mode="Markdown",
             disable_web_page_preview=True,
         ),
-        timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 editMessageText response: {resp.text}")
     _raise_for_status(resp)
@@ -424,43 +433,31 @@ def send_poll(node, when="Thursday", send_invite=True):
     else:
         print("⏭️ Skipping global chat invite message")
 
-    # Unpin previous polls for this node
-    old_polls = Poll.objects.filter(
-        node=node, message_id__isnull=False
-    ).exclude(message_id=message_id)
-    for old_poll in old_polls:
-        try:
-            print(f"📤 Unpinning old poll (message {old_poll.message_id})")
-            resp = requests.post(
-                f"{TELEGRAM_API_BASE}/{token}/unpinChatMessage",
-                json=dict(
-                    chat_id=chat_id,
-                    message_id=old_poll.message_id,
-                ),
-                timeout=REQUEST_TIMEOUT,
-            )
-            print(f"📥 unpinChatMessage response: {resp.json()}")
-        except requests.RequestException as e:
-            print(f"⚠️ Failed to unpin old poll: {e}")
-
-    # Try to pin it
+    # A failed pin must not fail the poll send: report it and move on
+    print(f"📤 Calling Telegram API: pinChatMessage (message {message_id})")
     try:
-        print(
-            f"📤 Calling Telegram API: pinChatMessage (message {message_id})"
-        )
-        resp = requests.post(
+        resp = _telegram_post(
             f"{TELEGRAM_API_BASE}/{token}/pinChatMessage",
-            json=dict(
+            dict(
                 chat_id=chat_id,
                 message_id=message_id,
                 disable_notification=False,
             ),
-            timeout=REQUEST_TIMEOUT,
         )
-        print(f"📥 pinChatMessage response: {resp.json()}")
-        print("📌 Poll pinned successfully")
-    except Exception as e:
+        result = resp.json()
+    except (requests.RequestException, ValueError) as e:
         print(f"❌ Failed to pin poll: {e}")
+        sentry_sdk.capture_exception(e)
+        return
+    print(f"📥 pinChatMessage response: {result}")
+    if result.get("ok"):
+        print("📌 Poll pinned successfully")
+    else:
+        print(f"❌ Failed to pin poll: {result}")
+        sentry_sdk.capture_message(
+            f"Failed to pin poll in chat {chat_id}: {result}",
+            level="error",
+        )
 
 
 def send_event_reminder(event):
@@ -505,10 +502,9 @@ def send_event_reminder(event):
 def send_chat_action(chat_id, action="typing"):
     token = _get_bot_token()
     print(f"📤 Calling Telegram API: sendChatAction ({action}) to {chat_id}")
-    resp = requests.post(
+    resp = _telegram_post(
         f"{TELEGRAM_API_BASE}/{token}/sendChatAction",
-        json=dict(chat_id=chat_id, action=action),
-        timeout=REQUEST_TIMEOUT,
+        dict(chat_id=chat_id, action=action),
     )
     _raise_for_status(resp)
     print(f"✅ Chat action '{action}' sent")
@@ -517,10 +513,9 @@ def send_chat_action(chat_id, action="typing"):
 def download_file(file_id):
     token = _get_bot_token()
     print(f"📤 Calling Telegram API: getFile for {file_id[:20]}...")
-    resp = requests.post(
+    resp = _telegram_post(
         f"{TELEGRAM_API_BASE}/{token}/getFile",
-        json=dict(file_id=file_id),
-        timeout=REQUEST_TIMEOUT,
+        dict(file_id=file_id),
     )
     _raise_for_status(resp)
     result = resp.json()
@@ -530,7 +525,7 @@ def download_file(file_id):
         return None
     print(f"📥 Downloading file: {file_path}")
     file_url = f"{TELEGRAM_API_BASE}/file/{token}/{file_path}"
-    resp = requests.get(file_url, timeout=60)
+    resp = _telegram_get(file_url, timeout=60)
     _raise_for_status(resp)
     print(f"✅ Downloaded {len(resp.content)} bytes")
     return resp.content
@@ -539,10 +534,9 @@ def download_file(file_id):
 def is_chat_admin(chat_id, user_id):
     token = _get_bot_token()
     print(f"📤 Calling Telegram API: getChatMember for user {user_id}")
-    resp = requests.post(
+    resp = _telegram_post(
         f"{TELEGRAM_API_BASE}/{token}/getChatMember",
-        json=dict(chat_id=chat_id, user_id=user_id),
-        timeout=REQUEST_TIMEOUT,
+        dict(chat_id=chat_id, user_id=user_id),
     )
     _raise_for_status(resp)
     result = resp.json().get("result", {})
@@ -559,9 +553,9 @@ def restrict_chat_member(chat_id, user_id, until_date):
     )
     token = _get_bot_token()
     url = f"{TELEGRAM_API_BASE}/{token}/restrictChatMember"
-    resp = requests.post(
+    resp = _telegram_post(
         url,
-        json=dict(
+        dict(
             chat_id=chat_id,
             user_id=user_id,
             permissions=dict(
@@ -578,7 +572,6 @@ def restrict_chat_member(chat_id, user_id, until_date):
             ),
             until_date=until_date,
         ),
-        timeout=REQUEST_TIMEOUT,
     )
     print(f"📥 restrictChatMember response: {resp.text}")
     _raise_for_status(resp)

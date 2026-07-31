@@ -4,6 +4,7 @@ from datetime import time
 from unittest.mock import patch
 
 import pytest
+import requests
 import responses
 
 from hackabot.apps.bot.models import Event, Poll
@@ -239,8 +240,6 @@ class TestSend:
                 status=400,
             )
 
-            import requests
-
             with pytest.raises(requests.HTTPError):
                 send(12345, "Hello!")
 
@@ -282,6 +281,64 @@ class TestSend:
             group = Group.objects.get(telegram_id=-1009999)
             assert group.display_name == "Old Group"
             assert not Group.objects.filter(telegram_id=12345).exists()
+
+    @responses.activate
+    def test_send_retries_on_flood_control(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={
+                    "ok": False,
+                    "error_code": 429,
+                    "description": "Too Many Requests: retry after 3",
+                    "parameters": {"retry_after": 3},
+                },
+                status=429,
+            )
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 42}},
+                status=200,
+            )
+
+            with patch("hackabot.apps.bot.telegram.time.sleep") as mock_sleep:
+                message_id = send(-1001234567890, "Hello!")
+
+            assert message_id == 42
+            mock_sleep.assert_called_once_with(3)
+            assert len(responses.calls) == 2
+
+    @responses.activate
+    def test_send_gives_up_on_long_flood_wait(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={
+                    "ok": False,
+                    "error_code": 429,
+                    "description": "Too Many Requests: retry after 600",
+                    "parameters": {"retry_after": 600},
+                },
+                status=429,
+            )
+
+            with patch("hackabot.apps.bot.telegram.time.sleep") as mock_sleep:
+                with pytest.raises(requests.HTTPError):
+                    send(-1001234567890, "Hello!")
+
+            mock_sleep.assert_not_called()
+            assert len(responses.calls) == 1
 
 
 class TestMigrateGroupChatId:
@@ -694,12 +751,17 @@ class TestSendPoll:
                 status=200,
             )
 
-            send_poll(node)
+            with patch(
+                "hackabot.apps.bot.telegram.sentry_sdk.capture_message"
+            ) as mock_capture:
+                send_poll(node)
 
             assert Poll.objects.filter(telegram_id="poll_123").exists()
+            mock_capture.assert_called_once()
+            assert mock_capture.call_args.kwargs["level"] == "error"
 
     @responses.activate
-    def test_send_poll_unpins_old_polls(self, db, node):
+    def test_send_poll_does_not_unpin_old_polls(self, db, node):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
             from hackabot.apps.bot import telegram
 
@@ -716,12 +778,6 @@ class TestSendPoll:
                 node=node,
                 message_id=901,
                 question="Old poll 2",
-            )
-            # Poll without message_id should not be unpinned
-            Poll.objects.create(
-                telegram_id="old_poll_3",
-                node=node,
-                question="Old poll no msg id",
             )
 
             responses.add(
@@ -752,13 +808,6 @@ class TestSendPoll:
 
             responses.add(
                 responses.POST,
-                f"{TELEGRAM_API_BASE}/bottesttoken/unpinChatMessage",
-                json={"ok": True, "result": True},
-                status=200,
-            )
-
-            responses.add(
-                responses.POST,
                 f"{TELEGRAM_API_BASE}/bottesttoken/pinChatMessage",
                 json={"ok": True, "result": True},
                 status=200,
@@ -766,18 +815,17 @@ class TestSendPoll:
 
             send_poll(node)
 
-            import json
-
             unpin_calls = [
                 c
                 for c in responses.calls
                 if "unpinChatMessage" in c.request.url
             ]
-            assert len(unpin_calls) == 2
-            unpinned_ids = {
-                json.loads(c.request.body)["message_id"] for c in unpin_calls
-            }
-            assert unpinned_ids == {900, 901}
+            assert len(unpin_calls) == 0
+            pin_calls = [
+                c for c in responses.calls if "pinChatMessage" in c.request.url
+            ]
+            assert len(pin_calls) == 1
+            assert json.loads(pin_calls[0].request.body)["message_id"] == 1002
 
 
 class TestSendEventReminder:
