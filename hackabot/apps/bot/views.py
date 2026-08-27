@@ -313,9 +313,7 @@ def _handle_message(message_data):
         photos = message_data.get("photo", [])
         caption = message_data.get("caption", "")
         if photos and caption:
-            node = _find_node_from_hashtags(caption)
-            if node:
-                _handle_photo_upload(message_data, node, photos, chat_id)
+            _handle_photo_caption(message_data, caption, photos, chat_id)
 
         text = message_data.get("text", "")
         if text and text.strip().lower() == "delete":
@@ -401,32 +399,68 @@ def _handle_poll_data(poll_data):
 
 
 FUZZY_MATCH_THRESHOLD = 0.85
+BRAND_PREFIX = "hacka"
 
 
-def _find_node_from_hashtags(text):
+def _extract_hashtags(text):
     if not text:
-        return None
-    hashtags = re.findall(r"#(\w+)", text.lower())
-    if not hashtags:
-        return None
+        return []
+    return re.findall(r"#(\w+)", text.lower())
 
+
+def _match_ratio(node_slug, hashtag):
+    a = node_slug
+    b = hashtag
+    if a.startswith(BRAND_PREFIX) and b.startswith(BRAND_PREFIX):
+        a = a[len(BRAND_PREFIX) :] or BRAND_PREFIX
+        b = b[len(BRAND_PREFIX) :] or BRAND_PREFIX
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _match_node(hashtag):
     nodes = list(Node.objects.filter(disabled=False))
 
     for node in nodes:
-        if node.name_slug in hashtags:
+        if node.name_slug == hashtag:
             return node
 
     best_match = None
     best_ratio = 0
     for node in nodes:
-        node_name_lower = node.name_slug
-        for hashtag in hashtags:
-            ratio = SequenceMatcher(None, node_name_lower, hashtag).ratio()
-            if ratio >= FUZZY_MATCH_THRESHOLD and ratio > best_ratio:
-                best_ratio = ratio
-                best_match = node
+        ratio = _match_ratio(node.name_slug, hashtag)
+        if ratio >= FUZZY_MATCH_THRESHOLD and ratio > best_ratio:
+            best_ratio = ratio
+            best_match = node
 
     return best_match
+
+
+def _find_node_from_hashtags(text):
+    for hashtag in _extract_hashtags(text):
+        node = _match_node(hashtag)
+        if node:
+            return node
+    return None
+
+
+def _match_hashtags(text):
+    hashtags = _extract_hashtags(text)
+    if not hashtags:
+        return dict(status="none", node=None, hashtags=hashtags)
+    if len(hashtags) > 1:
+        return dict(status="multiple", node=None, hashtags=hashtags)
+    node = _match_node(hashtags[0])
+    if node is None:
+        return dict(status="unknown", node=None, hashtags=hashtags)
+    return dict(status="matched", node=node, hashtags=hashtags)
+
+
+def _hashtag_error(status, hashtags):
+    tail = " Please reply to the photo with the right hashtag."
+    if status == "multiple":
+        return "🤔 Sorry, one hashtag only." + tail
+    tag = _escape_markdown("#" + hashtags[0])
+    return f"🤔 Sorry, {tag} isn't a node." + tail
 
 
 def _escape_markdown(text):
@@ -458,6 +492,17 @@ def _get_event_date(upload_dt, event_day, tz="UTC"):
     local_dt = arrow.get(upload_dt).to(tz)
     days_back = (local_dt.weekday() - event_day) % 7
     return local_dt.shift(days=-days_back).datetime
+
+
+def _handle_photo_caption(message_data, caption, photos, chat_id):
+    result = _match_hashtags(caption)
+    status = result["status"]
+    if status == "none":
+        return
+    if status == "matched":
+        _handle_photo_upload(message_data, result["node"], photos, chat_id)
+        return
+    send(chat_id, _hashtag_error(status, result["hashtags"]))
 
 
 def _handle_photo_upload(message_data, node, photos, chat_id):
@@ -542,6 +587,11 @@ def _handle_hashtag_reply(message_data, chat_id):
     if not photos:
         return
 
+    result = _match_hashtags(text)
+    status = result["status"]
+    if status == "none":
+        return
+
     largest_photo = photos[-1]
     file_id = largest_photo.get("file_id")
     if not file_id:
@@ -551,11 +601,11 @@ def _handle_hashtag_reply(message_data, chat_id):
         print(f"⏭️ Photo already uploaded, ignoring hashtag reply")
         return
 
-    node = _find_node_from_hashtags(text)
-    if not node:
+    if status == "matched":
+        _handle_photo_upload(reply_to, result["node"], photos, chat_id)
         return
 
-    _handle_photo_upload(reply_to, node, photos, chat_id)
+    send(chat_id, _hashtag_error(status, result["hashtags"]))
 
 
 def _handle_poll_answer(poll_answer_data):

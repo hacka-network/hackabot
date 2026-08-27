@@ -187,7 +187,9 @@ class TestPhotoUploadWebhook:
                     "from": {"id": 12345, "first_name": "Alice"},
                     "chat": {"id": -999999999, "type": "supergroup"},
                     "date": 1704067200,
-                    "photo": [{"file_id": "test123", "width": 640, "height": 480}],
+                    "photo": [
+                        {"file_id": "test123", "width": 640, "height": 480}
+                    ],
                     "caption": "#hackatestville",
                 },
             },
@@ -213,7 +215,9 @@ class TestPhotoUploadWebhook:
                     "from": {"id": 12345, "first_name": "Alice"},
                     "chat": {"id": -5117513714, "type": "supergroup"},
                     "date": 1704067200,
-                    "photo": [{"file_id": "test123", "width": 640, "height": 480}],
+                    "photo": [
+                        {"file_id": "test123", "width": 640, "height": 480}
+                    ],
                 },
             },
         )
@@ -224,6 +228,11 @@ class TestPhotoUploadWebhook:
     def test_photo_upload_unknown_hashtag_ignored(
         self, client, db, test_node, monkeypatch
     ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
             -5117513714,
@@ -238,7 +247,9 @@ class TestPhotoUploadWebhook:
                     "from": {"id": 12345, "first_name": "Alice"},
                     "chat": {"id": -5117513714, "type": "supergroup"},
                     "date": 1704067200,
-                    "photo": [{"file_id": "test123", "width": 640, "height": 480}],
+                    "photo": [
+                        {"file_id": "test123", "width": 640, "height": 480}
+                    ],
                     "caption": "#hackaunknown",
                 },
             },
@@ -246,10 +257,191 @@ class TestPhotoUploadWebhook:
 
         assert response.status_code == 200
         assert MeetupPhoto.objects.count() == 0
+        assert len(sent_messages) == 1
+        assert "isn't a node" in sent_messages[0][1]
+        assert "right hashtag" in sent_messages[0][1]
 
-    def test_duplicate_photo_ignored(
+    def test_photo_upload_no_hashtag_stays_silent(
         self, client, db, test_node, monkeypatch
     ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
+            -5117513714,
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 12345, "first_name": "Alice"},
+                    "chat": {"id": -5117513714, "type": "supergroup"},
+                    "date": 1704067200,
+                    "photo": [
+                        {"file_id": "test123", "width": 640, "height": 480}
+                    ],
+                    "caption": "just a nice photo of the meetup",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert MeetupPhoto.objects.count() == 0
+        assert sent_messages == []
+
+    def test_photo_upload_multiple_hashtags_error(
+        self, client, db, test_node, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
+            -5117513714,
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 12345, "first_name": "Alice"},
+                    "chat": {"id": -5117513714, "type": "supergroup"},
+                    "date": 1704067200,
+                    "photo": [
+                        {"file_id": "test123", "width": 640, "height": 480}
+                    ],
+                    "caption": "#hackatestville #hackaigon",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert MeetupPhoto.objects.count() == 0
+        assert len(sent_messages) == 1
+        assert "one hashtag only" in sent_messages[0][1]
+
+    def test_wrong_caption_then_reply_correction(
+        self, client, db, test_node, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send_chat_action",
+            lambda chat_id, action: None,
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.download_file",
+            lambda file_id: create_test_image(),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
+            -5117513714,
+        )
+
+        photo_message = {
+            "message_id": 1,
+            "from": {"id": 12345, "first_name": "Alice"},
+            "chat": {"id": -5117513714, "type": "supergroup"},
+            "date": 1704067200,
+            "photo": [
+                {"file_id": "small123", "width": 320, "height": 240},
+                {"file_id": "large456", "width": 1280, "height": 960},
+            ],
+            "caption": "#hackago",
+        }
+
+        response = post_webhook(
+            client,
+            {"update_id": 1001, "message": photo_message},
+        )
+
+        assert response.status_code == 200
+        assert MeetupPhoto.objects.count() == 0
+        assert "isn't a node" in sent_messages[0][1]
+
+        reply = dict(photo_message)
+        del reply["caption"]
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1002,
+                "message": {
+                    "message_id": 2,
+                    "from": {"id": 12345, "first_name": "Alice"},
+                    "chat": {"id": -5117513714, "type": "supergroup"},
+                    "date": 1704067300,
+                    "text": "#hackatestville",
+                    "reply_to_message": reply,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert MeetupPhoto.objects.count() == 1
+        photo = MeetupPhoto.objects.first()
+        assert photo.node == test_node
+        assert photo.telegram_file_id == "large456"
+        assert "Thanks!" in sent_messages[-1][1]
+
+    def test_reply_multiple_hashtags_error(
+        self, client, db, test_node, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
+            -5117513714,
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1002,
+                "message": {
+                    "message_id": 2,
+                    "from": {"id": 67890, "first_name": "Bob"},
+                    "chat": {"id": -5117513714, "type": "supergroup"},
+                    "date": 1704067300,
+                    "text": "#hackatestville #hackaigon",
+                    "reply_to_message": {
+                        "message_id": 1,
+                        "from": {"id": 12345, "first_name": "Alice"},
+                        "chat": {"id": -5117513714, "type": "supergroup"},
+                        "date": 1704067200,
+                        "photo": [
+                            {
+                                "file_id": "reply789",
+                                "width": 1280,
+                                "height": 960,
+                            },
+                        ],
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert MeetupPhoto.objects.count() == 0
+        assert len(sent_messages) == 1
+        assert "one hashtag only" in sent_messages[0][1]
+
+    def test_duplicate_photo_ignored(self, client, db, test_node, monkeypatch):
         MeetupPhoto.objects.create(
             node=test_node,
             telegram_file_id="existing123",
@@ -318,8 +510,16 @@ class TestPhotoUploadWebhook:
                         "chat": {"id": -5117513714, "type": "supergroup"},
                         "date": 1704067200,
                         "photo": [
-                            {"file_id": "small123", "width": 320, "height": 240},
-                            {"file_id": "reply456", "width": 1280, "height": 960},
+                            {
+                                "file_id": "small123",
+                                "width": 320,
+                                "height": 240,
+                            },
+                            {
+                                "file_id": "reply456",
+                                "width": 1280,
+                                "height": 960,
+                            },
                         ],
                     },
                 },
@@ -396,7 +596,11 @@ class TestPhotoUploadWebhook:
                         "chat": {"id": -5117513714, "type": "supergroup"},
                         "date": 1704067200,
                         "photo": [
-                            {"file_id": "already123", "width": 640, "height": 480},
+                            {
+                                "file_id": "already123",
+                                "width": 640,
+                                "height": 480,
+                            },
                         ],
                     },
                 },
@@ -408,9 +612,7 @@ class TestPhotoUploadWebhook:
 
 
 class TestDeletePhotoCommand:
-    def test_anyone_can_delete_photo(
-        self, client, db, test_node, monkeypatch
-    ):
+    def test_anyone_can_delete_photo(self, client, db, test_node, monkeypatch):
         MeetupPhoto.objects.create(
             node=test_node,
             telegram_file_id="photo123",
@@ -420,9 +622,7 @@ class TestDeletePhotoCommand:
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
@@ -467,9 +667,7 @@ class TestDeletePhotoCommand:
         sent_messages = []
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
-            lambda chat_id, text: sent_messages.append(
-                (chat_id, text)
-            ),
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
         )
         monkeypatch.setattr(
             "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
@@ -644,7 +842,9 @@ class TestHelperFunctions:
         assert _find_node_from_hashtags("#Hackatestville") == test_node
         assert _find_node_from_hashtags("#hackatestville") == test_node
         assert _find_node_from_hashtags("#HACKATESTVILLE") == test_node
-        assert _find_node_from_hashtags("Check out #Hackatestville!") == test_node
+        assert (
+            _find_node_from_hashtags("Check out #Hackatestville!") == test_node
+        )
         assert _find_node_from_hashtags("#unknown") is None
         assert _find_node_from_hashtags("No hashtag here") is None
         assert _find_node_from_hashtags("") is None
@@ -663,6 +863,44 @@ class TestHelperFunctions:
         assert _find_node_from_hashtags("#hacka") is None
         assert _find_node_from_hashtags("#completely") is None
 
+    def test_find_node_conservative_across_similar_nodes(self, db, test_group):
+        from hackabot.apps.bot.views import _find_node_from_hashtags
+
+        Node.objects.create(
+            group=test_group,
+            name="Hackaigon",
+            emoji="🇻🇳",
+            location="Saigon",
+            timezone="UTC",
+        )
+        Node.objects.create(
+            group=test_group,
+            name="Hackagu",
+            emoji="🇯🇵",
+            location="Nagu",
+            timezone="UTC",
+        )
+
+        # A hashtag for a node that does not exist must not match a
+        # different node just because they share the hacka prefix.
+        assert _find_node_from_hashtags("#hackago") is None
+        # A genuine typo of a real node still resolves.
+        matched = _find_node_from_hashtags("#hackaigoon")
+        assert matched.name == "Hackaigon"
+
+    def test_match_hashtags_statuses(self, db, test_node):
+        from hackabot.apps.bot.views import _match_hashtags
+
+        assert _match_hashtags("no hashtag here")["status"] == "none"
+        assert _match_hashtags("")["status"] == "none"
+        assert (
+            _match_hashtags("#hackatestville #extra")["status"] == "multiple"
+        )
+        assert _match_hashtags("#hackago")["status"] == "unknown"
+        matched = _match_hashtags("#hackatestville")
+        assert matched["status"] == "matched"
+        assert matched["node"] == test_node
+
     def test_escape_markdown(self):
         from hackabot.apps.bot.views import _escape_markdown
 
@@ -677,9 +915,7 @@ class TestPhotoCleanup:
     def test_cleanup_removes_oldest_photos(self, db, test_node, monkeypatch):
         from hackabot.apps.worker.run import process_photo_cleanup
 
-        monkeypatch.setattr(
-            "hackabot.apps.worker.run.MAX_PHOTOS", 3
-        )
+        monkeypatch.setattr("hackabot.apps.worker.run.MAX_PHOTOS", 3)
         monkeypatch.setattr(
             "hackabot.apps.worker.run.should_cleanup_photos",
             lambda now: True,
@@ -705,12 +941,12 @@ class TestPhotoCleanup:
         assert "photo0" not in remaining_ids
         assert "photo1" not in remaining_ids
 
-    def test_cleanup_does_nothing_under_limit(self, db, test_node, monkeypatch):
+    def test_cleanup_does_nothing_under_limit(
+        self, db, test_node, monkeypatch
+    ):
         from hackabot.apps.worker.run import process_photo_cleanup
 
-        monkeypatch.setattr(
-            "hackabot.apps.worker.run.MAX_PHOTOS", 10
-        )
+        monkeypatch.setattr("hackabot.apps.worker.run.MAX_PHOTOS", 10)
         monkeypatch.setattr(
             "hackabot.apps.worker.run.should_cleanup_photos",
             lambda now: True,
@@ -759,12 +995,8 @@ class TestGetEventDate:
         # Saturday 1am UTC = Friday 8pm in New York
         # For a Friday event (day=4), should land on that
         # same Friday in New York time
-        sat_utc = datetime(
-            2025, 2, 15, 1, 0, tzinfo=timezone.utc
-        )
-        result = _get_event_date(
-            sat_utc, 4, tz="America/New_York"
-        )
+        sat_utc = datetime(2025, 2, 15, 1, 0, tzinfo=timezone.utc)
+        result = _get_event_date(sat_utc, 4, tz="America/New_York")
         local = arrow.get(result).to("America/New_York")
         assert local.weekday() == 4
         assert local.date() == datetime(2025, 2, 14).date()
@@ -789,9 +1021,7 @@ class TestBackfillPhotoDateCommand:
 
         photo.refresh_from_db()
         assert photo.created.weekday() == 3
-        assert photo.created.date() == datetime(
-            2025, 2, 13
-        ).date()
+        assert photo.created.date() == datetime(2025, 2, 13).date()
 
     def test_dry_run_does_not_modify(self, db, test_node):
         test_node.event_day = 3
