@@ -597,7 +597,10 @@ def _longest_active_streak(person_ids, current_monday):
         return 0, None
     person_mondays = defaultdict(set)
     for pa in PollAnswer.objects.filter(
-        yes=True, person_id__in=person_ids
+        yes=True,
+        person_id__in=person_ids,
+        poll__is_attendance=True,
+        poll__node__isnull=False,
     ).select_related("poll"):
         person_mondays[pa.person_id].add(
             _monday_of_week(pa.poll.created.date())

@@ -1277,6 +1277,7 @@ class TestWeeklySummaryMessage:
                     telegram_id=f"poll_streak_{weeks_back}",
                     node=node,
                     question="?",
+                    is_attendance=True,
                 )
                 target_date = current_monday - timedelta(days=7 * weeks_back)
                 target_dt = timezone.make_aware(
@@ -1299,6 +1300,62 @@ class TestWeeklySummaryMessage:
             assert "Longest streak is" in body
             assert "@streaker" in body
             assert "(3 attendances in a row!)" in body
+
+    @responses.activate
+    def test_streak_ignores_non_attendance_and_nodeless_polls(
+        self, db, global_group, group
+    ):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            from hackabot.apps.bot import telegram
+
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            node = Node.objects.create(
+                group=group,
+                name="Hackagu",
+                emoji="🇮🇩",
+                timezone="UTC",
+            )
+            person = Person.objects.create(
+                telegram_id=70007,
+                first_name="Gamer",
+                username="gamer",
+            )
+
+            now = timezone.now()
+            current_monday = now.date() - timedelta(days=now.weekday())
+
+            def yes_poll(weeks_back, is_att, with_node):
+                p = Poll.objects.create(
+                    telegram_id=f"p_{weeks_back}_{is_att}_{with_node}",
+                    node=node if with_node else None,
+                    question="?",
+                    is_attendance=is_att,
+                )
+                target = current_monday - timedelta(days=7 * weeks_back)
+                target_dt = timezone.make_aware(
+                    datetime.combine(target, time(12, 0))
+                )
+                Poll.objects.filter(pk=p.pk).update(created=target_dt)
+                PollAnswer.objects.create(poll=p, person=person, yes=True)
+
+            yes_poll(0, True, True)
+            yes_poll(1, True, True)
+            yes_poll(2, False, True)
+            yes_poll(3, True, False)
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1002}},
+                status=200,
+            )
+
+            friday_3am_utc = arrow.Arrow(2024, 1, 12, 3, 0, 0, tzinfo="UTC")
+            process_weekly_summary(friday_3am_utc)
+
+            body = responses.calls[0].request.body.decode()
+            assert "(2 attendances in a row!)" in body
 
     @responses.activate
     def test_summary_promotes_mrr_group_when_link_set(

@@ -56,6 +56,7 @@ BIO_MAX_LENGTH = 140
 PRODUCT_NAME_MAX_LENGTH = 16
 PROOF_WINDOW_SECONDS = 15
 STALE_PENDING_HOURS = 1
+POLL_ANSWER_MAX_AGE_DAYS = 8
 MRR_PROOF_REQUEST = (
     "Now I just need proof you're doing *$10k+ a month*. It"
     " doesn't have to be recurring: subscriptions, one-time"
@@ -622,6 +623,14 @@ def _handle_poll_answer(poll_answer_data):
         poll = Poll.objects.get(telegram_id=poll_id)
     except Poll.DoesNotExist:
         print(f"⚠️ Poll {poll_id} not found in database")
+        return
+
+    # Telegram keeps polls open forever, so a member can scroll back
+    # and vote on months-old polls to fake attendance. Only accept
+    # answers while the poll belongs to the current week.
+    age = django_timezone.now() - poll.created
+    if age > timedelta(days=POLL_ANSWER_MAX_AGE_DAYS):
+        print(f"⚠️ Ignoring answer on stale poll {poll_id} ({age.days}d old)")
         return
 
     person = _get_or_create_person(user_data)

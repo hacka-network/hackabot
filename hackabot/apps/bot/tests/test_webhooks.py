@@ -1,7 +1,9 @@
 import json
+from datetime import timedelta
 
 import pytest
 from django.test import Client
+from django.utils import timezone
 
 from hackabot.apps.bot.models import (
     ActivityDay,
@@ -606,6 +608,36 @@ class TestWebhookPolls:
 
         assert response.status_code == 200
         assert PollAnswer.objects.count() == 0
+
+    def test_poll_answer_ignored_on_stale_poll(self, client, db, node, person):
+        stale = Poll.objects.create(
+            telegram_id="stale_poll",
+            node=node,
+            question="Who came weeks ago?",
+            is_attendance=True,
+        )
+        old = timezone.now() - timedelta(days=30)
+        Poll.objects.filter(pk=stale.pk).update(created=old)
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "poll_answer": {
+                    "poll_id": stale.telegram_id,
+                    "user": {
+                        "id": person.telegram_id,
+                        "first_name": person.first_name,
+                    },
+                    "option_ids": [0],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert not PollAnswer.objects.filter(
+            poll=stale, person=person
+        ).exists()
 
     def test_poll_in_group_without_node(self, client, db):
         Group.objects.create(
