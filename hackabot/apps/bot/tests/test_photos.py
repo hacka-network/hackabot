@@ -295,6 +295,40 @@ class TestPhotoUploadWebhook:
         assert MeetupPhoto.objects.count() == 0
         assert sent_messages == []
 
+    def test_photo_upload_non_brand_hashtag_stays_silent(
+        self, client, db, test_node, monkeypatch
+    ):
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text: sent_messages.append((chat_id, text)),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.PHOTO_UPLOAD_CHAT_ID",
+            -5117513714,
+        )
+
+        response = post_webhook(
+            client,
+            {
+                "update_id": 1001,
+                "message": {
+                    "message_id": 1,
+                    "from": {"id": 12345, "first_name": "Alice"},
+                    "chat": {"id": -5117513714, "type": "supergroup"},
+                    "date": 1704067200,
+                    "photo": [
+                        {"file_id": "test123", "width": 640, "height": 480}
+                    ],
+                    "caption": "#1",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        assert MeetupPhoto.objects.count() == 0
+        assert sent_messages == []
+
     def test_photo_upload_multiple_hashtags_error(
         self, client, db, test_node, monkeypatch
     ):
@@ -897,6 +931,8 @@ class TestHelperFunctions:
             _match_hashtags("#hackatestville #extra")["status"] == "multiple"
         )
         assert _match_hashtags("#hackago")["status"] == "unknown"
+        assert _match_hashtags("#1")["status"] == "none"
+        assert _match_hashtags("#london")["status"] == "none"
         matched = _match_hashtags("#hackatestville")
         assert matched["status"] == "matched"
         assert matched["node"] == test_node
@@ -909,6 +945,9 @@ class TestHelperFunctions:
 
         result = _escape_markdown("Test*Bold*")
         assert result == "Test\\*Bold\\*"
+
+        result = _escape_markdown("#hacka1")
+        assert result == "#hacka1"
 
 
 class TestPhotoCleanup:

@@ -451,9 +451,11 @@ def _match_hashtags(text):
     if len(hashtags) > 1:
         return dict(status="multiple", node=None, hashtags=hashtags)
     node = _match_node(hashtags[0])
-    if node is None:
+    if node:
+        return dict(status="matched", node=node, hashtags=hashtags)
+    if hashtags[0].startswith(BRAND_PREFIX):
         return dict(status="unknown", node=None, hashtags=hashtags)
-    return dict(status="matched", node=node, hashtags=hashtags)
+    return dict(status="none", node=None, hashtags=hashtags)
 
 
 def _hashtag_error(status, hashtags):
@@ -465,26 +467,7 @@ def _hashtag_error(status, hashtags):
 
 
 def _escape_markdown(text):
-    for char in [
-        "_",
-        "*",
-        "[",
-        "]",
-        "(",
-        ")",
-        "~",
-        "`",
-        ">",
-        "#",
-        "+",
-        "-",
-        "=",
-        "|",
-        "{",
-        "}",
-        ".",
-        "!",
-    ]:
+    for char in ["_", "*", "`", "["]:
         text = text.replace(char, f"\\{char}")
     return text
 
