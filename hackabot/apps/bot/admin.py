@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import base64
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Sum
 from django.utils import timezone
 from django.utils.html import format_html
@@ -18,6 +18,13 @@ from .models import (
     Person,
     Poll,
     PollAnswer,
+)
+
+NODES_JSON_NOTE = (
+    "Nodes are added and removed in nodes.json in the hacka.network repo, "
+    "not here. Unlisted follows that file, so to take a node off the site "
+    "and stop its polls, remove it from nodes.json. To pause polls for a "
+    "node that stays on the site, tick Disabled."
 )
 
 
@@ -143,7 +150,8 @@ class NodeAdmin(admin.ModelAdmin):
         "created",
     ]
     list_filter = ["disabled", "unlisted", "send_global_invite"]
-    list_editable = ["disabled", "unlisted", "send_global_invite"]
+    list_editable = ["disabled", "send_global_invite"]
+    readonly_fields = ["unlisted"]
 
     @admin.display(boolean=True, description="Group")
     def has_group(self, obj):
@@ -153,6 +161,20 @@ class NodeAdmin(admin.ModelAdmin):
     ordering = ["name"]
     raw_id_fields = ["group"]
     inlines = [EventInline]
+
+    def changelist_view(self, request, extra_context=None):
+        if request.method == "GET":
+            self.message_user(request, NODES_JSON_NOTE, messages.WARNING)
+        return super().changelist_view(request, extra_context)
+
+    def changeform_view(
+        self, request, object_id=None, form_url="", extra_context=None
+    ):
+        if request.method == "GET":
+            self.message_user(request, NODES_JSON_NOTE, messages.WARNING)
+        return super().changeform_view(
+            request, object_id, form_url, extra_context
+        )
 
     def messages_7d(self, obj):
         if not obj.group:
