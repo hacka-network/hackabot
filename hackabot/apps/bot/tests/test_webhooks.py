@@ -2982,7 +2982,7 @@ class TestSetEventTimeCommand:
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
             lambda chat_id, text, **kwargs: sent_messages.append(
-                (chat_id, text)
+                (chat_id, text, kwargs)
             ),
         )
         monkeypatch.setattr(
@@ -2999,6 +2999,7 @@ class TestSetEventTimeCommand:
         assert len(sent_messages) == 1
         assert "13:00" in sent_messages[0][1]
         assert "updated" in sent_messages[0][1].lower()
+        assert sent_messages[0][2].get("reply_to_message_id") == 42
         event = Event.objects.get(node=node, type="lunch")
         assert event.time == time(13, 0)
 
@@ -3011,7 +3012,7 @@ class TestSetEventTimeCommand:
         monkeypatch.setattr(
             "hackabot.apps.bot.views.send",
             lambda chat_id, text, **kwargs: sent_messages.append(
-                (chat_id, text)
+                (chat_id, text, kwargs)
             ),
         )
         monkeypatch.setattr(
@@ -3028,6 +3029,7 @@ class TestSetEventTimeCommand:
         assert len(sent_messages) == 1
         assert "16:30" in sent_messages[0][1]
         assert "created" in sent_messages[0][1].lower()
+        assert sent_messages[0][2].get("reply_to_message_id") == 42
         event = Event.objects.get(node=node, type="demos")
         assert event.time == time(16, 30)
 

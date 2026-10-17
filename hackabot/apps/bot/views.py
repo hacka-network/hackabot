@@ -443,6 +443,7 @@ def _handle_seteventtime_command(chat_id, message_data, node):
     send(
         chat_id,
         f"✅ {type_display} time {action} to {new_time.strftime('%H:%M')}",
+        reply_to_message_id=message_id,
     )
 
 
