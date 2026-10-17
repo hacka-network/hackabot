@@ -19,6 +19,7 @@ from requests import HTTPError, RequestException
 
 from .models import (
     ActivityDay,
+    Event,
     Group,
     GroupPerson,
     JoinRequest,
@@ -305,6 +306,12 @@ def _handle_message(message_data):
         if text.startswith("/timeout "):
             _handle_timeout_command(chat_id, message_data)
 
+    # Handle /seteventtime command in node channels
+    if text.startswith("/seteventtime"):
+        node = Node.objects.filter(group__telegram_id=chat_id).first()
+        if node:
+            _handle_seteventtime_command(chat_id, message_data, node)
+
     # Handle poll in message (when bot sends a poll)
     poll_data = message_data.get("poll")
     if poll_data:
@@ -370,6 +377,72 @@ def _handle_timeout_command(chat_id, message_data):
         " Please read the rules: https://github.com/"
         "hacka-network/hacka.network/blob/main/"
         "chat-rules.md",
+    )
+
+
+def _handle_seteventtime_command(chat_id, message_data, node):
+    sender_id = message_data.get("from", {}).get("id")
+    message_id = message_data.get("message_id")
+    if not sender_id:
+        return
+
+    if not is_chat_admin(chat_id, sender_id):
+        send(
+            chat_id,
+            "⛔ Only admins can change event times.",
+            reply_to_message_id=message_id,
+        )
+        return
+
+    text = message_data.get("text", "")
+    parts = text.split()
+    if len(parts) < 3:
+        send(
+            chat_id,
+            "⛔ Usage: /seteventtime <event> <HH:MM>\n"
+            "Events: intros, lunch, demos, drinks",
+            reply_to_message_id=message_id,
+        )
+        return
+
+    event_type = parts[1].lower()
+    valid_types = [
+        Event.TYPE_INTROS,
+        Event.TYPE_LUNCH,
+        Event.TYPE_DEMOS,
+        Event.TYPE_DRINKS,
+    ]
+    if event_type not in valid_types:
+        valid_list = ", ".join(valid_types)
+        send(
+            chat_id,
+            f"⛔ Unknown event '{event_type}'. Valid types: {valid_list}",
+            reply_to_message_id=message_id,
+        )
+        return
+
+    time_str = parts[2]
+    try:
+        new_time = datetime.strptime(time_str, "%H:%M").time()
+    except ValueError:
+        send(
+            chat_id,
+            "⛔ Invalid time format. Use HH:MM (e.g. 12:30)",
+            reply_to_message_id=message_id,
+        )
+        return
+
+    event, created = Event.objects.update_or_create(
+        node=node,
+        type=event_type,
+        defaults=dict(time=new_time),
+    )
+    action = "created" if created else "updated"
+    type_display = dict(Event.TYPE_CHOICES)[event_type]
+    print(f"⏰ Event time {action}: {node.name} {type_display} @ {new_time}")
+    send(
+        chat_id,
+        f"✅ {type_display} time {action} to {new_time.strftime('%H:%M')}",
     )
 
 

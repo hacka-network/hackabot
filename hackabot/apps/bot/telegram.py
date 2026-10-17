@@ -225,7 +225,7 @@ def send_long(chat_id, text):
         send(chat_id, chunk)
 
 
-def send(chat_id, text, parse_mode="Markdown"):
+def send(chat_id, text, parse_mode="Markdown", reply_to_message_id=None):
     print(f"📤 Calling Telegram API: sendMessage to chat {chat_id}")
     print(f"📤 Message: {text[:100]}{'...' if len(text) > 100 else ''}")
     payload = dict(
@@ -235,6 +235,8 @@ def send(chat_id, text, parse_mode="Markdown"):
     )
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if reply_to_message_id:
+        payload["reply_to_message_id"] = reply_to_message_id
     resp = _post_chat("sendMessage", payload)
     print(f"📥 sendMessage response: {resp.text}")
     _raise_for_status(resp)

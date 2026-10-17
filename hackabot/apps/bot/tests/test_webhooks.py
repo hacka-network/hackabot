@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import time, timedelta
 
 import pytest
 from django.test import Client
@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from hackabot.apps.bot.models import (
     ActivityDay,
+    Event,
     Group,
     GroupPerson,
     Node,
@@ -2928,3 +2929,292 @@ class TestWebhookChatMigration:
         survivor = Group.objects.get(telegram_id=-100222)
         assert survivor.id == old.id
         assert Node.objects.filter(group=survivor).count() == 1
+
+
+class TestSetEventTimeCommand:
+    NODE_CHANNEL_ID = -1001234567890
+
+    def _setup_node_channel(self, db):
+        group = Group.objects.create(
+            telegram_id=self.NODE_CHANNEL_ID,
+            display_name="Test Node Channel",
+        )
+        node = Node.objects.create(
+            group=group,
+            name="Test Node",
+            emoji="🚀",
+            timezone="UTC",
+        )
+        return group, node
+
+    def _make_group_message(
+        self, text, chat_id=None, user_id=12345, message_id=42
+    ):
+        if chat_id is None:
+            chat_id = self.NODE_CHANNEL_ID
+        return {
+            "update_id": 1001,
+            "message": dict(
+                message_id=message_id,
+                **{"from": {
+                    "id": user_id,
+                    "first_name": "Alice",
+                    "username": "alice123",
+                    "is_bot": False,
+                }},
+                chat={
+                    "id": chat_id,
+                    "type": "supergroup",
+                    "title": "Test Node Channel",
+                },
+                date=1704067200,
+                text=text,
+            ),
+        }
+
+    def test_seteventtime_updates_event_time(
+        self, client, db, monkeypatch
+    ):
+        _group, node = self._setup_node_channel(db)
+        Event.objects.create(node=node, type="lunch", time=time(12, 0))
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message("/seteventtime lunch 13:00"),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "13:00" in sent_messages[0][1]
+        assert "updated" in sent_messages[0][1].lower()
+        event = Event.objects.get(node=node, type="lunch")
+        assert event.time == time(13, 0)
+
+    def test_seteventtime_creates_event_when_none_exists(
+        self, client, db, monkeypatch
+    ):
+        _group, node = self._setup_node_channel(db)
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message("/seteventtime demos 16:30"),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "16:30" in sent_messages[0][1]
+        assert "created" in sent_messages[0][1].lower()
+        event = Event.objects.get(node=node, type="demos")
+        assert event.time == time(16, 30)
+
+    def test_seteventtime_non_admin_rejected(self, client, db, monkeypatch):
+        _group, _node = self._setup_node_channel(db)
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: sent_messages.append(
+                (chat_id, text, kwargs)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: False,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/seteventtime lunch 13:00", message_id=42
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "Only admins" in sent_messages[0][1]
+        assert sent_messages[0][2].get("reply_to_message_id") == 42
+
+    def test_seteventtime_non_admin_does_not_change_time(
+        self, client, db, monkeypatch
+    ):
+        _group, node = self._setup_node_channel(db)
+        Event.objects.create(node=node, type="lunch", time=time(12, 0))
+
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: False,
+        )
+
+        post_webhook(
+            client,
+            self._make_group_message("/seteventtime lunch 13:00"),
+        )
+
+        event = Event.objects.get(node=node, type="lunch")
+        assert event.time == time(12, 0)
+
+    def test_seteventtime_unknown_event_type_rejected(self, client, db, monkeypatch):
+        _group, node = self._setup_node_channel(db)
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: sent_messages.append(
+                (chat_id, text, kwargs)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message("/seteventtime breakfast 08:00", message_id=42),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "breakfast" in sent_messages[0][1]
+        assert sent_messages[0][2].get("reply_to_message_id") == 42
+        assert Event.objects.filter(node=node).count() == 0
+
+    def test_seteventtime_invalid_time_format_rejected(self, client, db, monkeypatch):
+        _group, node = self._setup_node_channel(db)
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: sent_messages.append(
+                (chat_id, text, kwargs)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message("/seteventtime lunch 2pm", message_id=42),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "HH:MM" in sent_messages[0][1]
+        assert sent_messages[0][2].get("reply_to_message_id") == 42
+        assert Event.objects.filter(node=node).count() == 0
+
+    def test_seteventtime_shows_usage_without_args(self, client, db, monkeypatch):
+        _group, _node = self._setup_node_channel(db)
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: sent_messages.append(
+                (chat_id, text, kwargs)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message("/seteventtime", message_id=42),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 1
+        assert "Usage" in sent_messages[0][1]
+        assert sent_messages[0][2].get("reply_to_message_id") == 42
+
+    def test_seteventtime_ignored_in_non_node_channel(
+        self, client, db, monkeypatch
+    ):
+        Group.objects.create(
+            telegram_id=-9999999999,
+            display_name="Random Group",
+        )
+
+        sent_messages = []
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: sent_messages.append(
+                (chat_id, text)
+            ),
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        response = post_webhook(
+            client,
+            self._make_group_message(
+                "/seteventtime lunch 12:00", chat_id=-9999999999
+            ),
+        )
+
+        assert response.status_code == 200
+        assert len(sent_messages) == 0
+
+    def test_seteventtime_accepts_all_event_types(self, client, db, monkeypatch):
+        _group, node = self._setup_node_channel(db)
+
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.send",
+            lambda chat_id, text, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            "hackabot.apps.bot.views.is_chat_admin",
+            lambda chat_id, user_id: True,
+        )
+
+        for event_type, event_time in [
+            ("intros", "09:00"),
+            ("lunch", "12:30"),
+            ("demos", "16:00"),
+            ("drinks", "18:30"),
+        ]:
+            post_webhook(
+                client,
+                self._make_group_message(
+                    f"/seteventtime {event_type} {event_time}"
+                ),
+            )
+
+        assert Event.objects.filter(node=node).count() == 4
+        assert Event.objects.get(node=node, type="intros").time == time(9, 0)
+        assert Event.objects.get(node=node, type="lunch").time == time(12, 30)
+        assert Event.objects.get(node=node, type="demos").time == time(16, 0)
+        assert Event.objects.get(node=node, type="drinks").time == time(18, 30)
