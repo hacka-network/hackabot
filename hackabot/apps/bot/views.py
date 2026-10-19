@@ -307,7 +307,8 @@ def _handle_message(message_data):
             _handle_timeout_command(chat_id, message_data)
 
     # Handle /seteventtime command in node channels
-    if text.startswith("/seteventtime"):
+    words = text.split()
+    if words and words[0].split("@")[0] == "/seteventtime":
         node = Node.objects.filter(group__telegram_id=chat_id).first()
         if node:
             _handle_seteventtime_command(chat_id, message_data, node)
@@ -394,29 +395,26 @@ def _handle_seteventtime_command(chat_id, message_data, node):
         )
         return
 
+    valid_types = [value for value, _label in Event.TYPE_CHOICES]
+    valid_list = ", ".join(valid_types)
+
     text = message_data.get("text", "")
     parts = text.split()
     if len(parts) < 3:
         send(
             chat_id,
             "⛔ Usage: /seteventtime <event> <HH:MM>\n"
-            "Events: intros, lunch, demos, drinks",
+            f"Events: {valid_list}",
             reply_to_message_id=message_id,
         )
         return
 
     event_type = parts[1].lower()
-    valid_types = [
-        Event.TYPE_INTROS,
-        Event.TYPE_LUNCH,
-        Event.TYPE_DEMOS,
-        Event.TYPE_DRINKS,
-    ]
     if event_type not in valid_types:
-        valid_list = ", ".join(valid_types)
         send(
             chat_id,
-            f"⛔ Unknown event '{event_type}'. Valid types: {valid_list}",
+            f"⛔ Unknown event '{_escape_markdown(event_type)}'. "
+            f"Valid types: {valid_list}",
             reply_to_message_id=message_id,
         )
         return
@@ -438,7 +436,7 @@ def _handle_seteventtime_command(chat_id, message_data, node):
         defaults=dict(time=new_time),
     )
     action = "created" if created else "updated"
-    type_display = dict(Event.TYPE_CHOICES)[event_type]
+    type_display = event.get_type_display()
     print(f"⏰ Event time {action}: {node.name} {type_display} @ {new_time}")
     send(
         chat_id,

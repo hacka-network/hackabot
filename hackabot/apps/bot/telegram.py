@@ -236,7 +236,10 @@ def send(chat_id, text, parse_mode="Markdown", reply_to_message_id=None):
     if parse_mode:
         payload["parse_mode"] = parse_mode
     if reply_to_message_id:
-        payload["reply_to_message_id"] = reply_to_message_id
+        payload["reply_parameters"] = dict(
+            message_id=reply_to_message_id,
+            allow_sending_without_reply=True,
+        )
     resp = _post_chat("sendMessage", payload)
     print(f"📥 sendMessage response: {resp.text}")
     _raise_for_status(resp)

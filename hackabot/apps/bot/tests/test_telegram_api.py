@@ -7,6 +7,7 @@ import pytest
 import requests
 import responses
 
+from hackabot.apps.bot import telegram
 from hackabot.apps.bot.models import Event, Poll
 from hackabot.apps.bot.telegram import (
     ALLOWED_UPDATES,
@@ -339,6 +340,27 @@ class TestSend:
 
             mock_sleep.assert_not_called()
             assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_send_reply_tolerates_deleted_message(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "testtoken"}):
+            telegram.TELEGRAM_BOT_TOKEN = "testtoken"
+
+            responses.add(
+                responses.POST,
+                f"{TELEGRAM_API_BASE}/bottesttoken/sendMessage",
+                json={"ok": True, "result": {"message_id": 1001}},
+                status=200,
+            )
+
+            send(12345, "Hello!", reply_to_message_id=42)
+
+            body = json.loads(responses.calls[0].request.body)
+            assert body["reply_parameters"] == dict(
+                message_id=42,
+                allow_sending_without_reply=True,
+            )
+            assert "reply_to_message_id" not in body
 
 
 class TestMigrateGroupChatId:
