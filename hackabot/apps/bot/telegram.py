@@ -1,9 +1,11 @@
 import hmac
+import json
 import os
 import sys
 import time
 from collections import defaultdict
 from datetime import timedelta
+from pathlib import Path
 
 import requests
 import sentry_sdk
@@ -29,6 +31,11 @@ TELEGRAM_RETRY_AFTER_MAX = 60
 # Fullwidth asterisk (U+FF0A) so the whole title can sit inside a Markdown
 # bold range — Telegram's MD V1 parser doesn't reliably handle \* inside *…*.
 HACKA_BOLD = "Hacka＊"
+WEEKLY_WIDGET_HTML = (
+    Path(__file__).parent / "widgets" / "weekly_stats.html"
+).read_text()
+# Keeps the widget under Telegram's 600px bubble height
+WEEKLY_WIDGET_MAX_NODES = 12
 
 
 def _raise_for_status(resp):
@@ -265,6 +272,18 @@ def send_with_keyboard(chat_id, text, keyboard):
     print(f"📥 sendMessage response: {resp.text}")
     _raise_for_status(resp)
     print("✅ Message with keyboard sent successfully")
+    return resp.json().get("result", {}).get("message_id")
+
+
+def send_widget(chat_id, html, public_data):
+    print(f"📤 Calling Telegram API: sendWidget to chat {chat_id}")
+    resp = _post_chat(
+        "sendWidget",
+        dict(chat_id=chat_id, html=html, public_data=public_data),
+    )
+    print(f"📥 sendWidget response: {resp.text}")
+    _raise_for_status(resp)
+    print("✅ Widget sent successfully")
     return resp.json().get("result", {}).get("message_id")
 
 
@@ -593,6 +612,22 @@ def _display_person(username, first_name):
     return _md_escape(first_name or "Someone")
 
 
+def _plain_person(username, first_name):
+    if username:
+        return f"@{username}"
+    return first_name or "Someone"
+
+
+def _week_label(now):
+    start = (now - timedelta(days=7)).date()
+    end = (now - timedelta(days=1)).date()
+    if start.month == end.month:
+        label = f"{start.day}–{end.day} {end:%b}"
+    else:
+        label = f"{start.day} {start:%b}–{end.day} {end:%b}"
+    return label.upper()
+
+
 def _monday_of_week(d):
     return d - timedelta(days=d.weekday())
 
@@ -636,7 +671,8 @@ def send_weekly_attendance_summary():
         print("❌ Global group not found, skipping weekly summary")
         return False
 
-    one_week_ago = timezone.now() - timedelta(days=7)
+    now = timezone.now()
+    one_week_ago = now - timedelta(days=7)
     yes_answers = PollAnswer.objects.filter(
         yes=True,
         poll__created__gte=one_week_ago,
@@ -645,8 +681,12 @@ def send_weekly_attendance_summary():
 
     node_attendance = dict()
     all_person_ids = set()
+    latest_node = dict()
     for answer in yes_answers:
         node = answer.poll.node
+        latest = latest_node.get(answer.person_id)
+        if latest is None or answer.poll.created > latest[0]:
+            latest_node[answer.person_id] = (answer.poll.created, node)
         if node.id not in node_attendance:
             node_attendance[node.id] = dict(
                 node=node,
@@ -697,7 +737,7 @@ def send_weekly_attendance_summary():
         d["node"].emoji for d in nodes_with_attendance if d["node"].emoji
     }
 
-    current_monday = _monday_of_week(timezone.now().date())
+    current_monday = _monday_of_week(now.date())
     top_streak_count, top_streak_pid = _longest_active_streak(
         all_person_ids, current_monday
     )
@@ -715,11 +755,19 @@ def send_weekly_attendance_summary():
         )
     lines.append("")
 
+    node_rows = []
     for data in nodes_with_attendance:
         node = data["node"]
         count = len(data["person_ids"])
         name = f"{node.emoji} {node.name}" if node.emoji else node.name
         lines.append(f"• {name}: {count}")
+        node_rows.append([node.emoji, node.name, count])
+
+    widget = dict(
+        w=_week_label(now),
+        n=node_rows[:WEEKLY_WIDGET_MAX_NODES],
+        m=max(len(node_rows) - WEEKLY_WIDGET_MAX_NODES, 0),
+    )
 
     lines.append("")
     if top_yapper and top_yapper["total_messages"] > 0:
@@ -731,6 +779,13 @@ def send_weekly_attendance_summary():
             f"🏆 Biggest yapper of the week is {name} "
             f"({top_yapper['total_messages']} messages)"
         )
+        widget["y"] = [
+            _plain_person(
+                top_yapper["person__username"],
+                top_yapper["person__first_name"],
+            ),
+            top_yapper["total_messages"],
+        ]
 
     if loudest:
         nfg = (
@@ -740,12 +795,15 @@ def send_weekly_attendance_summary():
         )
         if nfg:
             nname = f"{nfg.emoji} {nfg.name}" if nfg.emoji else nfg.name
+            plain_name = nname
         else:
-            nname = _md_escape(loudest["group__display_name"])
+            plain_name = loudest["group__display_name"]
+            nname = _md_escape(plain_name)
         lines.append(
             f"🗣️ Yappiest group chat of the week is {nname} "
             f"({loudest['total']} messages)"
         )
+        widget["g"] = [plain_name, loudest["total"]]
 
     if top_streak_count >= 2 and top_streak_pid:
         p = Person.objects.get(id=top_streak_pid)
@@ -754,13 +812,24 @@ def send_weekly_attendance_summary():
             f"🔥 Longest streak is {name} "
             f"({top_streak_count} attendances in a row!)"
         )
+        streak_node = latest_node[top_streak_pid][1]
+        widget["k"] = [
+            _plain_person(p.username, p.first_name),
+            streak_node.emoji,
+            top_streak_count,
+        ]
 
     message = "\n".join(lines)
+    public_data = json.dumps(widget, ensure_ascii=False, separators=(",", ":"))
 
-    print(
-        f"📤 Sending weekly summary to global group {global_group.telegram_id}"
-    )
-    send(global_group.telegram_id, message)
+    chat_id = global_group.telegram_id
+    print(f"📤 Sending weekly summary to global group {chat_id}")
+    try:
+        send_widget(chat_id, WEEKLY_WIDGET_HTML, public_data)
+    except HTTPError as e:
+        # Telegram only allows widgets in private chats for now
+        print(f"⚠️ Weekly widget refused, sending text instead: {e}")
+        send(chat_id, message)
     print("✅ Weekly attendance summary sent")
 
     if settings.MRR_10K_INVITE_LINK:

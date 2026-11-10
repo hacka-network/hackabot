@@ -1,0 +1,226 @@
+<style>
+* { box-sizing: border-box }
+body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  color: #3872EC;
+  font: 500 13px/1.35 ui-monospace, monospace;
+}
+#w {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  padding: 18px 14px max(14px, env(safe-area-inset-bottom));
+  background: #000;
+}
+.o {
+  position: absolute;
+  width: 110%;
+  height: 55%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side, rgba(56, 114, 236, .32), transparent
+  );
+}
+#o1 { left: -5%; top: -18%; animation: a 9s ease-in-out infinite alternate }
+#o2 {
+  left: -40%;
+  top: 55%;
+  background: radial-gradient(
+    closest-side, rgba(56, 114, 236, .2), transparent
+  );
+  animation: b 13s ease-in-out infinite alternate;
+}
+@keyframes a { to { transform: translate(28%, 22%) scale(.8) } }
+@keyframes b { to { transform: translate(60%, -30%) scale(1.25) } }
+#c { position: relative }
+#l svg {
+  display: block;
+  margin: 0 auto;
+  width: 72%;
+  max-width: 260px;
+  height: auto;
+}
+.t {
+  text-align: center;
+  letter-spacing: .18em;
+  font-size: 10px;
+  color: #6BA3FF;
+  margin: 12px 0 14px;
+}
+.r {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 12px;
+}
+.r span {
+  flex: 0 0 112px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #6BA3FF;
+}
+.k {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  height: 9px;
+  background: repeating-linear-gradient(
+    90deg, #0d1d40 0 7px, transparent 7px 9px
+  );
+}
+.b {
+  height: 9px;
+  background: repeating-linear-gradient(
+    90deg, #3872EC 0 7px, transparent 7px 9px
+  );
+  animation: g 1.1s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes g { from { width: 0 } }
+.r em {
+  flex: 0 0 22px;
+  font-style: normal;
+  text-align: right;
+  color: #A8C6FF;
+}
+.r.top span, .r.top em { color: #FFD479 }
+.r.top .b {
+  background: repeating-linear-gradient(
+    90deg, #FFC65C 0 7px, transparent 7px 9px
+  );
+}
+.m { margin: 6px 0; font-size: 11px; color: #6BA3FF }
+hr { border: 0; border-top: 1px dashed #1f3f86; margin: 14px 0 10px }
+.a { display: flex; gap: 8px; margin: 6px 0; font-size: 12px }
+.a i { flex: 0 0 18px; font-style: normal }
+.a div { flex: 1; min-width: 0 }
+.a p { display: flex; gap: 8px; margin: 0 }
+.a u {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  color: #3872EC;
+  opacity: .75;
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+.a span {
+  flex: 1;
+  min-width: 0;
+  color: #A8C6FF;
+  overflow-wrap: anywhere;
+}
+.a b { white-space: nowrap; color: #6BA3FF; font-weight: 500 }
+@media (prefers-reduced-motion: reduce) { .o, .b { animation: none } }
+</style>
+<div id="w">
+  <div class="o" id="o1"></div>
+  <div class="o" id="o2"></div>
+  <div id="c">
+    <div id="l"></div>
+    <div class="t" id="h"></div>
+    <div id="n"></div>
+    <hr>
+    <div id="a"></div>
+  </div>
+</div>
+<script>
+const W = window.TelegramWidget;
+const $ = (id) => document.getElementById(id);
+
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+
+// 7x7 pixel glyphs for the logo, one bitmask per row
+const A = [28, 54, 99, 99, 127, 99, 99];
+const GLYPHS = [
+  [99, 99, 99, 127, 99, 99, 99],
+  A,
+  [30, 51, 96, 96, 96, 51, 30],
+  [99, 102, 108, 120, 124, 110, 103],
+  A,
+  [0, 54, 28, 127, 28, 54, 0],
+];
+
+function drawLogo() {
+  let rects = "";
+  GLYPHS.forEach((rows, i) => rows.forEach((bits, y) => {
+    let x = 0;
+    while (x < 7) {
+      if ((bits >> (6 - x)) & 1) {
+        let end = x;
+        while (end < 7 && (bits >> (6 - end)) & 1) end++;
+        rects += `<rect x="${i * 8 + x}" y="${y}" width="${end - x}"`
+          + ` height="1"/>`;
+        x = end;
+      } else {
+        x++;
+      }
+    }
+  }));
+  $("l").innerHTML = `<svg viewBox="0 0 47 7" width="235" height="35"`
+    + ` fill="#3872EC" shape-rendering="crispEdges">${rects}</svg>`;
+}
+
+function readData() {
+  try {
+    return JSON.parse(W.publicData);
+  } catch (e) {
+    return null;
+  }
+}
+
+function render() {
+  const d = readData();
+  if (!d) return;
+  $("h").textContent = "WEEKLY STATS · " + d.w;
+
+  const nodes = $("n");
+  nodes.textContent = "";
+  const max = Math.max(...d.n.map((x) => x[2]), 1);
+  d.n.forEach(([emoji, name, count], i) => {
+    const row = el("div", i ? "r" : "r top");
+    const track = el("div", "k");
+    const bar = el("div", "b");
+    bar.style.width = (count / max) * 100 + "%";
+    track.append(bar);
+    const label = emoji ? emoji + " " + name : name;
+    row.append(el("span", "", label), track, el("em", "", count));
+    nodes.append(row);
+  });
+  if (d.m) nodes.append(el("div", "m", "+" + d.m + " more"));
+
+  const awards = $("a");
+  awards.textContent = "";
+  const streak = d.k && [(d.k[1] + " " + d.k[0]).trim(), d.k[2]];
+  [
+    ["🏆", "GLOBAL YAPPER OF THE WEEK", d.y, "messages"],
+    ["🗣️", "YAPPIEST GROUP CHAT", d.g, "messages"],
+    ["🔥", "LONGEST STREAK", streak, "in a row"],
+  ].forEach(([icon, title, value, unit]) => {
+    if (!value) return;
+    const row = el("div", "a");
+    const body = el("div");
+    const line = el("p");
+    line.append(
+      el("span", "", value[0]),
+      el("b", "", value[1] + " " + unit),
+    );
+    body.append(el("u", "", title), line);
+    row.append(el("i", "", icon), body);
+    awards.append(row);
+  });
+}
+
+drawLogo();
+render();
+</script>

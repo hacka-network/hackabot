@@ -6,6 +6,7 @@ import arrow
 import pytest
 import responses
 from django.utils import timezone
+from requests import HTTPError
 
 from hackabot.apps.bot.models import (
     ActivityDay,
@@ -48,6 +49,14 @@ def _stub_node_sync(monkeypatch):
         lambda *args, **kwargs: dict(aborted=False),
     )
     monkeypatch.setattr("hackabot.apps.worker.run._last_node_sync_at", None)
+
+
+@pytest.fixture(autouse=True)
+def _widget_not_allowed(monkeypatch):
+    def refuse(*args, **kwargs):
+        raise HTTPError("400 Bad Request: INPUT_MEDIA_WIDGET_NOT_ALLOWED")
+
+    monkeypatch.setattr("hackabot.apps.bot.telegram.send_widget", refuse)
 
 
 class TestShouldSendPoll:
