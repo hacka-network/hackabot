@@ -72,6 +72,8 @@ class GroupPerson(models.Model):
     left = models.BooleanField(default=False)
     last_message_at = models.DateTimeField(null=True, blank=True)
     welcomed = models.BooleanField(default=False)
+    joined_at = models.DateTimeField(null=True, blank=True)
+    inactivity_warned_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ["group", "person"]
@@ -95,6 +97,12 @@ class GroupPerson(models.Model):
                 else None
             ),
             welcomed=self.welcomed,
+            joined_at=(self.joined_at.isoformat() if self.joined_at else None),
+            inactivity_warned_at=(
+                self.inactivity_warned_at.isoformat()
+                if self.inactivity_warned_at
+                else None
+            ),
         )
 
 

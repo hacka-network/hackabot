@@ -556,7 +556,7 @@ def download_file(file_id):
     return resp.content
 
 
-def is_chat_admin(chat_id, user_id):
+def get_chat_member_status(chat_id, user_id):
     token = _get_bot_token()
     print(f"📤 Calling Telegram API: getChatMember for user {user_id}")
     resp = _telegram_post(
@@ -564,8 +564,26 @@ def is_chat_admin(chat_id, user_id):
         dict(chat_id=chat_id, user_id=user_id),
     )
     _raise_for_status(resp)
-    result = resp.json().get("result", {})
-    status = result.get("status", "")
+    return resp.json().get("result", {}).get("status", "")
+
+
+def remove_chat_member(chat_id, user_id):
+    print(
+        f"📤 Calling Telegram API: unbanChatMember to remove {user_id}"
+        f" from chat {chat_id}"
+    )
+    token = _get_bot_token()
+    url = f"{TELEGRAM_API_BASE}/{token}/unbanChatMember"
+    # Without only_if_banned, unban kicks a current member but leaves
+    # them free to rejoin, which is the soft removal we want.
+    resp = _telegram_post(url, dict(chat_id=chat_id, user_id=user_id))
+    print(f"📥 unbanChatMember response: {resp.text}")
+    _raise_for_status(resp)
+    print("✅ Member removed")
+
+
+def is_chat_admin(chat_id, user_id):
+    status = get_chat_member_status(chat_id, user_id)
     is_admin = status in ("administrator", "creator")
     print(f"📥 User {user_id} status: {status} (admin={is_admin})")
     return is_admin

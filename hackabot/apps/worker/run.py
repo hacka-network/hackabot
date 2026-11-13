@@ -7,6 +7,7 @@ import sentry_sdk
 from django.db import close_old_connections
 from django.utils import timezone
 
+from hackabot.apps.bot.lurkers import process_lurkers
 from hackabot.apps.bot.node_sync import sync_nodes_from_url
 from hackabot.apps.bot.views import expire_stale_join_requests
 from hackabot.apps.bot.telegram import (
@@ -40,8 +41,10 @@ YEARLY_SUMMARY_HOUR = 12
 CLEANUP_HOUR = 0
 MAX_PHOTOS = 100
 NODE_SYNC_INTERVAL_SECONDS = 300
+LURKER_CHECK_HOUR = 9
 
 _last_node_sync_at = None
+_last_lurker_check_on = None
 
 
 def get_event_day_name(node):
@@ -275,6 +278,19 @@ def process_stale_join_requests():
         print(f"🧹 Expired {expired} stale join requests")
 
 
+def process_lurker_check(now_utc):
+    global _last_lurker_check_on
+
+    if now_utc.hour != LURKER_CHECK_HOUR:
+        return
+    if _last_lurker_check_on == now_utc.date():
+        return
+
+    _last_lurker_check_on = now_utc.date()
+    result = process_lurkers()
+    print(f"👀 Lurker check result: {result}")
+
+
 def process_node_sync(now_utc):
     global _last_node_sync_at
 
@@ -307,6 +323,7 @@ def check_all_nodes():
     process_yearly_summary(now_utc)
     process_photo_cleanup(now_utc)
     process_stale_join_requests()
+    process_lurker_check(now_utc)
 
 
 def run_worker():

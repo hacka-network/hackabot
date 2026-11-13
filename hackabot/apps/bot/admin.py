@@ -93,6 +93,7 @@ class GroupPersonAdmin(admin.ModelAdmin):
         "messages_7d",
         "messages_30d",
         "left",
+        "inactivity_warned_at",
         "created",
     ]
     list_filter = ["left", "group"]

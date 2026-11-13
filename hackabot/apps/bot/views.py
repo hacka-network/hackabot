@@ -30,6 +30,7 @@ from .models import (
     PollAnswer,
 )
 from .geo import nearest_node
+from .lurkers import announce_saved_from_purge
 from .node_sync import sync_nodes_from_url
 from .stripe_mrr import extract_stripe_link, verify_mrr
 from .telegram import (
@@ -251,7 +252,11 @@ def _handle_message(message_data):
             GroupPerson.objects.update_or_create(
                 group=group,
                 person=person,
-                defaults=dict(left=False),
+                defaults=dict(
+                    left=False,
+                    joined_at=django_timezone.now(),
+                    inactivity_warned_at=None,
+                ),
             )
             print(f"✅ {person.first_name} joined {group.display_name}")
 
@@ -277,12 +282,27 @@ def _handle_message(message_data):
         message_dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
 
         if person:
+            was_warned = GroupPerson.objects.filter(
+                group=group,
+                person=person,
+                inactivity_warned_at__isnull=False,
+            ).exists()
+
             # Update group membership and last message time
             GroupPerson.objects.update_or_create(
                 group=group,
                 person=person,
-                defaults=dict(left=False, last_message_at=message_dt),
+                defaults=dict(
+                    left=False,
+                    last_message_at=message_dt,
+                    inactivity_warned_at=None,
+                ),
             )
+
+            if was_warned:
+                announce_saved_from_purge(
+                    group, person, message_data.get("message_id")
+                )
 
             # Update activity bucket for today
             message_date = message_dt.date()
@@ -735,10 +755,14 @@ def _handle_chat_member(chat_member_data):
 
     not_present = ("left", "kicked")
     left = new_status in not_present
+    defaults = dict(left=left)
+    if not left and old_status in not_present:
+        defaults["joined_at"] = django_timezone.now()
+        defaults["inactivity_warned_at"] = None
     GroupPerson.objects.update_or_create(
         group=group,
         person=person,
-        defaults=dict(left=left),
+        defaults=defaults,
     )
 
     if left:
