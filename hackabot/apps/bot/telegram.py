@@ -1,4 +1,5 @@
 import hmac
+import html
 import json
 import os
 import sys
@@ -834,12 +835,13 @@ def send_weekly_attendance_summary():
 
     if settings.MRR_10K_INVITE_LINK:
         print("📤 Sending $10k MRR group promo after weekly summary")
+        link = html.escape(settings.MRR_10K_INVITE_LINK)
         send(
             global_group.telegram_id,
-            "🏦 We have a private $10k+ MRR group. Join with this"
-            " link and the bot will message you to verify:"
-            f" {settings.MRR_10K_INVITE_LINK}",
-            parse_mode=None,
+            "🏦 We have a private $10k+ MRR group."
+            f' <a href="{link}">Tap here</a> and the bot will message'
+            " you to verify.",
+            parse_mode="HTML",
         )
 
     return True

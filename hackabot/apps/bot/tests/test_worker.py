@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, time, timedelta
 from unittest.mock import MagicMock, patch
@@ -1409,8 +1410,12 @@ class TestWeeklySummaryMessage:
             assert len(responses.calls) == 2
             promo_body = responses.calls[1].request.body.decode()
             assert "private $10k+ MRR group" in promo_body
-            assert "https://t.me/+abc_DEF-123" in promo_body
-            assert "parse_mode" not in promo_body
+            promo = json.loads(promo_body)
+            assert promo["parse_mode"] == "HTML"
+            assert (
+                '<a href="https://t.me/+abc_DEF-123">Tap here</a> and'
+                in promo["text"]
+            )
 
     def test_summary_skips_mrr_promo_when_link_unset(
         self, db, global_group, settings
